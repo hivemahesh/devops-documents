@@ -50,8 +50,221 @@ Restart=on-abort
 [Install]
 WantedBy=multi-user.target
 
+==================================================================================
+
 [root@ip-172-31-32-162 bin]# cd
 [root@ip-172-31-32-162 ~]# service nexus start
 
+On the Nexus Repository::
+-----------------------------------
+maven-snapshots --- http://18.218.197.210:8081/repository/maven-snapshots/
+maven-releases  --- http://18.218.197.210:8081/repository/maven-releases/
+=======================================================================================================================================
+
+Manual Process:
+-----------------------
+
+[root@ip-172-31-32-162 ~]# git clone https://github.com/Naresh240/Springboot-As-Service.git
+
+Current pom.xml --->
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>2.0.5.RELEASE</version>
+    </parent>
+
+Let's integrate nexus with pom.xml -------->
+
+https://www.baeldung.com/maven-deploy-nexus
+
+<distributionManagement>
+   <snapshotRepository>
+      <id>maven-snapshots</id>
+      <url>http://18.218.197.210:8081/repository/maven-snapshots</url>
+   </snapshotRepository>   
+   <repository>
+      <id>maven-releases</id>
+      <url>http://18.218.197.210:8081/repository/maven-releases/</url>
+   </repository>
+</distributionManagement>
+
+Place the above content in the pom.xml below dependencies in pom.xml file
+
+[root@ip-172-31-32-162 ~]# cd /opt
+[root@ip-172-31-32-162 opt]# wget https://apachemirror.wuchna.com/maven/maven-3/3.8.1/binaries/apache-maven-3.8.1-bin.tar.gz
+[root@ip-172-31-32-162 opt]# tar -xzvf apache-maven-3.8.1-bin.tar.gz
+[root@ip-172-31-32-162 opt]# mv apache-maven-3.8.1 maven-3.8.1
+[root@ip-172-31-32-162 bin]# export PATH=$PATH:/opt/maven-3.8.1/bin/
+[root@ip-172-31-32-162 bin]# mvn -version
 
 
+[root@ip-172-31-32-162 Springboot-As-Service]# mvn clean install  ---> to test for execution
+
+[root@ip-172-31-32-162 Springboot-As-Service]# mvn deploy
+
+#It failed because for authentication issue, we need to pass the nexus username and password in the mvn config
+[root@ip-172-31-32-162 conf]# pwd
+/opt/maven-3.8.1/conf
+[root@ip-172-31-32-162 conf]# vi settings.xml
+
+<server>
+      <id>maven-snapshots</id>
+      <username>admin</username>
+      <password>admin123</password>
+</server>
+<server>
+      <id>maven-releases</id>
+      <username>admin</username>
+      <password>admin123</password>
+</server>
+  </servers>
+
+---------------------------------------------------------------
+[root@ip-172-31-32-162 ~]# cd Springboot-As-Service/
+[root@ip-172-31-32-162 Springboot-As-Service]# mvn deploy
+
+output:: Uploading to maven-releases: http://18.218.197.210:8081/repository/maven-releases/org/springframework/gs-spring-boot/0.1.0/gs-spring-boot-0.1.0.jar
+
+We can check now in Nexus Repository URL --> Release --> and see the release uploaded***
+
+=================================================================================================================
+
+Automation using Jenkins
+--------------------------------
+
+Create a Jenkins Server with t2.medium *****
+
+[root@jenkins ~]# yum install git maven java-1.8.0-openjdk-devel -y
+
+[root@jenkins ~]# sudo wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo
+[root@jenkins ~]# sudo rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io.key
+[root@jenkins ~]#  yum install jenkins -y
+
+[root@jenkins ~]# service jenkins start  ---> Enable port 8080 in SG
+
+------------------------------
+
+Integrate jenkins with Nexus-----
+
+1. Jenkins --> Manage Jenkins --> Manage Plugins ---> "Nexus Artifact Uploader"
+"Pipeline Utility Steps" --> plugin for DSL method 'readMavenPom', we have used in the pipeline script**
+
+[root@jenkins ~]# which git
+/bin/git
+
+[root@jenkins ~]# mvn -version
+Apache Maven 3.0.5 (Red Hat 3.0.5-17)
+Maven home: /usr/share/maven
+
+Add these content in Jenkins --> Global Tool Configuration --> maven3  /usr/share/maven
+
+
+2. Create Project --> Pipeline (for all syntax, check in pipeline syntax and get the code** )
+We have scripted pipeline(starts with node) and declarative pipeline, and we are using declarative pipeline here***
+
+stage("Push Artifact"){
+            steps{
+                nexusArtifactUploader artifacts: [[artifactId: 'gs-spring-boot', classifier: '', 
+                file: 'gs-spring-boot-0.1.0.jar', type: 'jar']], 
+                credentialsId: 'nexuslogin', groupId: 'org.springframework', nexusUrl: '18.218.197.210:8081', 
+                nexusVersion: 'nexus3', protocol: 'http', repository: 'maven-releases<', version: '0.1.0'
+            }
+
+Instead of writing this huge content we will do https://github.com/Naresh240/springboohello-CICD/blob/master/Jenkinsfile-NexusCI
+
+*********************************************************
+
+pipeline{
+    agent any
+    environment {
+        NEXUS_VERSION = "nexus3"
+        NEXUS_PROTOCOL = "http"
+        NEXUS_URL = "18.218.197.210:8081"
+        NEXUS_REPOSITORY = "maven-releases"
+        NEXUS_CREDENTIAL_ID = "nexuslogin"
+    }
+    stages{
+        stage("SCM") {
+            steps{
+                checkout([$class: 'GitSCM',
+                         branches: [[name: '*/main']], 
+                         extensions: [], 
+                         userRemoteConfigs: [[url: 'https://github.com/Naresh240/Springboot-As-Service.git']]])
+            }
+        }
+        stage("Build Artifact"){
+            steps {
+                sh "mvn clean install"
+            }
+        }
+        stage("Publish to Nexus Repository Manager") {
+            steps {
+                script{
+                    pom = readMavenPom file: "pom.xml";
+                    filesByGlob = findFiles(glob: "target/*.${pom.packaging}");
+                    echo "${filesByGlob[0].name} ${filesByGlob[0].path} ${filesByGlob[0].directory} ${filesByGlob[0].length} ${filesByGlob[0].lastModified}"
+                    artifactPath = filesByGlob[0].path;
+                    artifactExists = fileExists artifactPath;
+                    if(artifactExists) {
+                        echo "* File: ${artifactPath}, group: ${pom.groupId}, packaging: ${pom.packaging}, version ${pom.version}";
+                        nexusArtifactUploader(
+                            nexusVersion: NEXUS_VERSION,
+                            protocol: NEXUS_PROTOCOL,
+                            nexusUrl: NEXUS_URL,
+                            groupId: pom.groupId,
+                            version: pom.version,
+                            repository: NEXUS_REPOSITORY,
+                            credentialsId: NEXUS_CREDENTIAL_ID,
+                            artifacts: [
+                                [artifactId: pom.artifactId,
+                                classifier: '',
+                                file: artifactPath,
+                                type: pom.packaging],
+                                [artifactId: pom.artifactId,
+                                classifier: '',
+                                file: "pom.xml",
+                                type: "pom"]
+                            ]
+                        );
+                    } else {
+                        error "* File: ${artifactPath}, could not be found";
+                    }
+                }
+            }
+        }
+        
+    }
+}
+
+*********************************************************
+
+
+After this script run, it will fail for "org.jenkinsci.plugins.scriptsecurity.sandbox.RejectedAccessException: Scripts not permitted to use method org.apache.maven.model.Model getPackaging"
+
+So we need to go to Manage Jenkins --> "In-process script Approval" --> click on "Approve"
+
+After this, run the pipeline script and it went to success****
+
+
+Download the above jar file from nexus to our local folder using CURL command -- I downloaded to my maven host where jenkins not installed****
+
+[root@ip-172-31-32-162 ~]# curl -u admin:admin123 -X GET http://18.218.197.210:8081/repository/maven-releases/org/springframework/gs-spring-boot/0.1.0/gs-spring-boot-0.1.0.jar --output gs-spring-boot-0.1.0.jar
+
+[root@ip-172-31-32-162 ~]# ll
+total 15856
+drwxr-xr-x 3 root root       87 Jun 26 16:50 devops-documents
+-rw-r--r-- 1 root root 16233150 Jun 26 17:02 gs-spring-boot-0.1.0.jar
+drwxr-xr-x 5 root root       75 Jun 26 16:11 Springboot-As-Service
+[root@ip-172-31-32-162 ~]#
+
+
+[root@ip-172-31-32-162 ~]# chmod +x gs-spring-boot-0.1.0.jar
+[root@ip-172-31-32-162 ~]# ll gs-spring-boot-0.1.0.jar
+-rwxr-xr-x 1 root root 16233150 Jun 26 17:02 gs-spring-boot-0.1.0.jar
+
+[root@ip-172-31-32-162 ~]# java -jar gs-spring-boot-0.1.0.jar
+
+Allow 8080 in SG
+
+http://18.218.197.210:8080/   ===> Output --> Greetings from Springboot..!!!
