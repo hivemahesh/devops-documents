@@ -1,0 +1,57 @@
+Prequiste:
+===========
+Minimum 1 VCPU & 2 GB Memory
+Server firewall opened for port 22 & 8081
+OpenJDK 8
+All Nexus processes should run as a non-root nexus user
+
+=================================================================================
+
+yum install git java-1.8.0-openjdk-devel -y
+cd /opt
+wget https://download.sonatype.com/nexus/3/nexus-3.31.1-01-unix.tar.gz
+tar -xvzf nexus-3.31.1-01-unix.tar.gz
+chown ec2-user:ec2-user nexus-3.31.1-01 -R
+chown ec2-user:ec2-user sonatype-work -R
+cd nexus-3.31.1-01/bin
+vi nexus.rc
+run_as_user="ec2-user"
+
+./nexus start
+./nexus status
+
+cat /opt/sonatype-work/nexus3/admin.password
+
+Now login to Nexus using instance IP address and port 8081
+
+========================================================================================
+
+Running Nexus as a System Service
+-------------------
+
+First stop the nexus service::  ./nexus stop
+
+sudo vi /etc/systemd/system/nexus.service
+
+[Unit]
+Description=nexus service
+After=network.target
+
+[Service]
+Type=forking
+LimitNOFILE=65536
+User=ec2-user
+Group=ec2-user
+ExecStart=/opt/nexus-3.31.1-01/bin/nexus start
+ExecStop=/opt/nexus-3.31.1-01/bin/nexus stop
+User=ec2-user
+Restart=on-abort
+
+[Install]
+WantedBy=multi-user.target
+
+[root@ip-172-31-32-162 bin]# cd
+[root@ip-172-31-32-162 ~]# service nexus start
+
+
+
