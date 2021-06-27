@@ -1,0 +1,12 @@
+Advantages of Deployment---
+One deployment already there in production. After few days client assks for new deployment . THis requirmement developers will write code based on new requirement. 
+WIthout downtime we have to move these new requirement, into production.
+We can use differeent deployment strategies--
+1. Rolling update and rollback
+2. Blue and Green Deployment
+3. Canary Deployment
+
+Link: https://thenewstack.io/deployment-strategies/
+--------------------------------------
+
+
