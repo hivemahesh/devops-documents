@@ -8,5 +8,16 @@ We can use differeent deployment strategies--
 
 Link: https://thenewstack.io/deployment-strategies/
 --------------------------------------
+Rolling Update and Rollback-
+==================
+[root@ip-172-31-44-228 ~]# yum install docker -y && service docker start
 
+[root@ip-172-31-44-228 ~]# git clone https://github.com/Naresh240/RollingUpdate-Rollback-NodejsApp.git
+
+[root@ip-172-31-44-228 RollingUpdate-Rollback-NodejsApp]# docker login
+
+[root@ip-172-31-44-228 RollingUpdate-Rollback-NodejsApp]# docker build -t maheshroshini08/nodejs-helloworld:v1 .
+[root@ip-172-31-44-228 RollingUpdate-Rollback-NodejsApp]# docker images
+REPOSITORY                          TAG       IMAGE ID       CREATED         SIZE
+maheshroshini08/nodejs-helloworld   v1        e3ba2ce872eb   8 seconds ago   914MB
 
