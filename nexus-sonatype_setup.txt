@@ -268,3 +268,39 @@ drwxr-xr-x 5 root root       75 Jun 26 16:11 Springboot-As-Service
 Allow 8080 in SG
 
 http://18.218.197.210:8080/   ===> Output --> Greetings from Springboot..!!!
+
+============================================================================================================
+Commands to pull from Nexus -----*** very important from Naresh
+#!/bin/sh
+
+repo="http://3.231.156.33:8081"
+groupId=$1
+artifactId=$2
+version=$3
+
+# optional
+classifier=$4
+type=$5
+
+if [[ $type == "" ]]; then
+  type="jar"
+fi
+if [[ $classifier != "" ]]; then
+  classifier="-${classifier}"
+fi
+
+groupIdUrl="${groupId//.//}"
+filename="${artifactId}-${version}${classifier}.${type}"
+
+if [[ ${version} == SNAPSHOT ]]; then repo_type="maven-snapshots"; else repo_type="maven-releases"; fi
+
+if [[ $repo_type == "maven-releases" ]]
+ then
+   wget --no-check-certificate "${repo}/repository/maven-releases/${groupIdUrl}/${artifactId}/${version}/${artifactId}-${version}${classifier}.${type}" -O ${filename} -k
+ else
+   versionTimestamped=$(wget -q -O- --no-check-certificate "${repo}/repository/maven-snapshots/${groupIdUrl}/${artifactId}/${version}/maven-metadata.xml" | grep value | head -1 | sed -e 's/\(.\)<value>/\1/' | sed -e 's/\(.\)<\/value>/\1/' | sed -e 's/ //g')
+
+   wget --no-check-certificate "${repo}/repository/maven-snapshots/${groupIdUrl}/${artifactId}/${version}/${artifactId}-${versionTimestamped}${classifier}.${type}" -O ${filename}
+ fi
+ 
+ ============================================================================================================
