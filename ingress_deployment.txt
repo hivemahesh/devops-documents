@@ -1,3 +1,5 @@
+
+
 1. Create the ec2 with t2.medium and create the EKS cluster
 2. Attach the IAM Role for it
 3. Create the EKS cluster
