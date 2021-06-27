@@ -42,5 +42,330 @@ spec:
       port: 80
       targetPort: 80
 
+Note: targetPort and containerPort should be always same****
+
 -------------------------------------------------------------------
+
+
+After the deployment, we can check in loadbalancer on AWS console and using it we can access the Nginx in URL
+
+##################################################################################
+
+
+Created hosted zone in Route53 and added NameServers in the freenom.com***
+
+vamsiopdev.ml
+
+-------------------------------
+
+After these we need to create a "A" record for that...
+
+on Route53 --> Create a record ---> www ---> Selet "alias" and then select region and LB name
+
+http://www.vamsiopdev.ml/    ---> now we can access nginx page with Route53**
+
+============================================================================================================
+
+Ingress:: 
+____________________________
+1. Host-based Routing      2. Path-based Routing
+
+
+
+Setting up Ingress Controller---- Popular are ALB and Nginx, and we are using ALB here***
+################
+
+https://github.com/Naresh240/ALB-Ingress-Controller-Setup.git
+
+ALB Install Ingress Controller:
+
+****************************************************************************
+
+Create a Kubernetes service account named alb-ingress-controller in the kube-system namespace
+
+List all serviceAccount --: kubectl get sa -n kube-system
+
+Create ClusterRole, ClusterRoleBinding & ServiceAccount :
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/aws-alb-ingress-controller/master/docs/examples/rbac-role.yaml
+[root@ip-172-31-44-228 ~]# kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/aws-alb-ingress-controller/master/docs/examples/rbac-role.yaml
+
+clusterrole.rbac.authorization.k8s.io/alb-ingress-controller created
+clusterrolebinding.rbac.authorization.k8s.io/alb-ingress-controller created
+serviceaccount/alb-ingress-controller created
+
+[root@ip-172-31-44-228 ~]# kubectl get sa -n kube-system|grep alb-ingress-controller
+alb-ingress-controller               1         36s
+
+[root@ip-172-31-44-228 ~]# kubectl describe sa alb-ingress-controller -n kube-system
+Name:                alb-ingress-controller
+Namespace:           kube-system
+Labels:              app.kubernetes.io/name=alb-ingress-controller
+Annotations:         kubectl.kubernetes.io/last-applied-configuration:
+                       {"apiVersion":"v1","kind":"ServiceAccount","metadata":{"annotations":{},"labels":{"app.kubernetes.io/name":"alb-ingress-controller"},"name...
+Image pull secrets:  <none>
+Mountable secrets:   alb-ingress-controller-token-2bq7n
+Tokens:              alb-ingress-controller-token-2bq7n
+Events:              <none>
+
+
+****************************************************************************
+
+Create policy using below json file:   ===> TO deploy IngressControler we need some policy****
+
+IAM --> Policies --> Create "alb-ingress-controller-policy" --> select JSON and copy the content and save.. We get 
+
+Policy ARN:    arn:aws:iam::305286667209:policy/alb-ingress-controller-policy
+
+****************************************************************************
+
+Create Role and attach policy to a Role: --> attacing this to OIDC provider*** who will communicate with our SA
+
+Currently we have one OIDC which we executed while creating EKS clsuter**
+
+
+[root@ip-172-31-44-228 ~]# aws iam list-open-id-connect-providers
+{
+    "OpenIDConnectProviderList": [
+        {
+            "Arn": "arn:aws:iam::305286667209:oidc-provider/oidc.eks.us-east-2.amazonaws.com/id/C0EE27A4555728710E6F3C67B87A8CC4"
+        }
+    ]
+}
+
+[root@ip-172-31-44-228 ~]# eksctl create iamserviceaccount \
+>     --region us-east-2 \
+>     --name alb-ingress-controller \
+>     --namespace kube-system \
+>     --cluster eksdemo1 \
+>     --attach-policy-arn arn:aws:iam::305286667209:policy/alb-ingress-controller-policy \
+> --override-existing-serviceaccounts \
+>     --approve
+
+This arn we got it from the policy which we created in IAM and our cluster is eksdemo1 **
+
+Now if we check in "Roles" we can see the role " eksctl-eksdemo1-addon-iamserviceaccount-kube-Role1-RE7C1Z0C903W" created and policy "alb-ingress-controller-policy" being attached******
+
+****************************************************************************
+
+To check iam service account: to clarify the above thing we execute below commands---
+
+[root@ip-172-31-44-228 ~]# eksctl  get iamserviceaccount --cluster eksdemo1 --region us-east-2
+2021-06-27 11:37:40 [ℹ]  eksctl version 0.54.0
+2021-06-27 11:37:40 [ℹ]  using region us-east-2
+NAMESPACE       NAME                    ROLE ARN
+kube-system     alb-ingress-controller  arn:aws:iam::305286667209:role/eksctl-eksdemo1-addon-iamserviceaccount-kube-Role1-RE7C1Z0C903W
+
+[root@ip-172-31-44-228 ~]# kubectl describe sa alb-ingress-controller -n kube-system
+
+****************************************************************************
+
+Deploy ALB Ingress Controller---
+
+[root@ip-172-31-44-228 ~]# kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/aws-alb-ingress-controller/master/docs/examples/alb-ingress-controller.yaml
+deployment.apps/alb-ingress-controller created
+
+[root@ip-172-31-44-228 ~]# kubectl get pods -n kube-system
+NAME                                     READY   STATUS             RESTARTS   AGE
+alb-ingress-controller-7b4cdcc5b-lg49v   0/1     CrashLoopBackOff   3          85s
+
+CrashLoopBackOff --> the args of ours and the above yml file may be not matching***
+
+[root@ip-172-31-44-228 ~]# kubectl get deploy -n kube-system
+NAME                     READY   UP-TO-DATE   AVAILABLE   AGE
+alb-ingress-controller   0/1     1            0           3m11s
+
+[root@ip-172-31-44-228 ~]# kubectl edit deployment alb-ingress-controller -n kube-system
+
+Replaced cluster-name with our cluster-name eksdemo1-----
+
+Before:
+    spec:
+      containers:
+      - args:
+        - --ingress-class=alb
+
+After:
+    spec:
+      containers:
+      - args:
+        - --ingress-class=alb
+        - --cluster-name=eksdemo1    ******************
+
+Save and check
+
+[root@ip-172-31-44-228 ~]# kubectl get deploy -n kube-system
+NAME                     READY   UP-TO-DATE   AVAILABLE   AGE
+alb-ingress-controller   1/1     1            1           6m55s
+
+
+****************************************************************************
+Verify our ALB Ingress Controller is running
+
+[root@ip-172-31-44-228 ~]# kubectl get pods -n kube-system
+NAME                                      READY   STATUS    RESTARTS   AGE
+alb-ingress-controller-7f699ff874-bcxr7   1/1     Running   0          57s
+
+Verify logs----
+
+[root@ip-172-31-44-228 ~]# kubectl logs -f $(kubectl get po -n kube-system | egrep -o 'alb-ingress-controller-[A-Za-z0-9-]+') -n kube-system
+
+OR
+
+[root@ip-172-31-44-228 ~]# kubectl logs alb-ingress-controller-7f699ff874-bcxr7 -n kube-system
+
+=======================================================================================================================
+
+NOw we will creaet the Ingress file to access the serivce:::
+
+https://github.com/Naresh240/RollingUpdate-Rollback-NodejsApp.git
+
+[root@ip-172-31-44-228 ~]# cat ingress.yml
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: nginx-ingress
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /
+        backend:
+          serviceName: nginx-service   ********** our svc name which is already running
+          servicePort:  80
+
+[root@ip-172-31-44-228 ~]#
+
+Host based Routing:: wildcard.domainname --> www.companyname.com i.e., nginx.domainname , jenkins.domainname
+(infrastructure routing)
+
+Path based routing::: domain ---> domain/api   --> page
+    				  domain/jenkins ---> Page
+				  domain/nginx   ---> page
+
+[root@ip-172-31-44-228 ~]# kubectl apply -f ingress.yml
+ingress.networking.k8s.io/nginx-ingress created
+[root@ip-172-31-44-228 ~]# kubectl get ingress
+NAME            CLASS    HOSTS   ADDRESS   PORTS   AGE
+nginx-ingress   <none>   *                 80      5s
+
+
+[root@ip-172-31-44-228 ~]# kubectl logs alb-ingress-controller-7f699ff874-bcxr7 -n kube-system
+
+E0627 12:33:23.013799       1 controller.go:217] kubebuilder/controller "msg"="Reconciler error" "error"="failed to build LoadBalancer configuration due to failed to resolve 2 qualified subnet with at least 8 free IP Addresses for ALB. Subnets must contains these tags: 'kubernetes.io/cluster/eksdemo1': ['shared' or 'owned'] and 'kubernetes.io/role/elb': ['' or '1']. See https://kubernetes-sigs.github.io/aws-alb-ingress-controller/guide/controller/config/#subnet-auto-discovery for more details. Resolved qualified subnets: '[]'"  "controller"="alb-ingress-controller" "request"={"Namespace":"default","Name":"nginx-ingress"}
+
+
+Go to VPC --> subnets --> click on both of the eks public subnet tags one by one( eksctl-eksdemo1-cluster/SubnetPublicUSEAST2A, eksctl-eksdemo1-cluster/SubnetPublicUSEAST2B
+) ---> Tags --> Manage Tags
+
+Now we need to check for above two things::
+1. 'kubernetes.io/cluster/eksdemo1': ['shared' or 'owned']  ------------> This is not there
+2. 'kubernetes.io/role/elb': ['' or '1']  ----> THis is there
+
+so we will add the missign one to both the public subnets---
+
+kubernetes.io/cluster/eksdemo1  owned
+
+--------------------------------------------------
+
+[root@ip-172-31-44-228 ~]# kubectl delete -f ingress.yml
+ingress.networking.k8s.io "nginx-ingress" deleted
+[root@ip-172-31-44-228 ~]# kubectl apply -f ingress.yml
+ingress.networking.k8s.io/nginx-ingress created
+[root@ip-172-31-44-228 ~]# kubectl get ingress
+NAME            CLASS    HOSTS   ADDRESS                                                                  PORTS   AGE
+nginx-ingress   <none>   *       6ad0ef5b-default-nginxingr-29e9-1775174036.us-east-2.elb.amazonaws.com   80      5s
+[root@ip-172-31-44-228 ~]#
+
+
+For VPC we will do it::    eksctl-eksdemo1-cluster/VPC  - here we added both****
+
+kubernetes.io/cluster/eksdemo1  owned
+kubernetes.io/role/elb		1
+
+NOw if we check in AWS LoadBalancer, we can see new ALB creating in "Provisioning" state. After few sec, it will become "Active"
+
+6ad0ef5b-default-nginxingr-29e9-1775174036.us-east-2.elb.amazonaws.com  -- same as what we got in kubectl get ingress
+
+
+Now this ALB will communicate with our Classic LB******
+
+Checked in URL with above ALB dns name, it is working*****
+
+-----------------------------------------------------------------------------------
+
+NOw we need this expose ALB to ROUTE53 -----
+
+Created the hosted zone again and added NameServers to freenom.
+
+Click on create record give, www and point to new ALB dns name and check it********
+
+www.vamsiopdev.ml  ====> it is working*****
+
+
+When we check the above URL, it is not secured. SO we need to use external certificate to be secure***
+
+
+Click on ACM --> provision certificate --> Request Public certifacte --> Domain Name: www.vamsiopdev.ml ->Next and Confirm and Request
+
+NOw we will see "validation status - pending", under this we can see "Create record in Route5e" click on it and it will automatically create it.
+
+Now we can see the CNAME in Route53..... and everything is set
+
+
+------------------------------------------------
+
+NOw to make the URL secure, go to ingress.yml file
+
+
+[root@ip-172-31-44-228 ~]# cat ingress.yml
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: nginx-ingress
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS":443}]'
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-2:305286667209:certificate/f4b2f830-ddae-4b29-93bb-2c90fa6f0913
+    alb.ingress.kubernetes.io/healthcheck-protocol: HTTP
+    alb.ingress.kubernetes.io/healthcheck-port: traffic-port
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: '15'
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: '5'
+    alb.ingress.kubernetes.io/success-codes: '200'
+    alb.ingress.kubernetes.io/healthy-threshold-count: '2'
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: '2'
+    alb.ingress.kubernetes.io/actions.ssl-redirect: '{"Type": "redirect", "RedirectConfig": { "Protocol": "HTTPS", "Port": "443", "StatusCode": "HTTP_301"}}'
+    external-dns.alpha.kubernetes.io/hostname: www.vamsiopdev.ml
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /* # SSL Redirect Setting
+        backend:
+          serviceName: ssl-redirect
+          servicePort: use-annotation
+      - path: /
+        backend:
+          serviceName: nginx-service
+          servicePort:  80
+
+--------------------
+
+alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-2:305286667209:certificate/f4b2f830-ddae-4b29-93bb-2c90fa6f0913
+copy the arn from the certifacte manager*****
+
+external-dns.alpha.kubernetes.io/hostname: www.vamsiopdev.ml
+
+
+[root@ip-172-31-44-228 ~]# kubectl apply -f ingress.yml
+
+
+
+
+
+
+
 
