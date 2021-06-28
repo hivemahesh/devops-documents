@@ -16,8 +16,375 @@ Rolling Update and Rollback-
 
 [root@ip-172-31-44-228 RollingUpdate-Rollback-NodejsApp]# docker login
 
-[root@ip-172-31-44-228 RollingUpdate-Rollback-NodejsApp]# docker build -t maheshroshini08/nodejs-helloworld:v1 .
-[root@ip-172-31-44-228 RollingUpdate-Rollback-NodejsApp]# docker images
+[root@ip-172-31-41-248 RollingUpdate-Rollback-NodejsApp]# docker build -t maheshroshini08/nodejs-helloworld:v1 .
+
+[root@ip-172-31-41-248 RollingUpdate-Rollback-NodejsApp]# docker images
 REPOSITORY                          TAG       IMAGE ID       CREATED         SIZE
-maheshroshini08/nodejs-helloworld   v1        e3ba2ce872eb   8 seconds ago   914MB
+maheshroshini08/nodejs-helloworld   v1        6a03c9216591   8 seconds ago   914MB
+
+[root@ip-172-31-41-248 RollingUpdate-Rollback-NodejsApp]# docker push maheshroshini08/nodejs-helloworld:v1
+
+Now i can see the image in docker hub. 
+
+Currently in the server.js file we have the display as "hello world" for v1, client as asked for a change and we have updated as "hello world...." for v2 ***
+
+  res.send('Hello World');   to   res.send('Hello World......!');  in 
+[root@ip-172-31-41-248 RollingUpdate-Rollback-NodejsApp]# cat server.js
+
+Now we are build it again with v2****
+
+
+[root@ip-172-31-41-248 RollingUpdate-Rollback-NodejsApp]# docker build -t maheshroshini08/nodejs-helloworld:v2 .
+
+Again we will push the same to docker hub------
+
+[root@ip-172-31-41-248 RollingUpdate-Rollback-NodejsApp]# docker push maheshroshini08/nodejs-helloworld:v2
+
+[root@ip-172-31-41-248 RollingUpdate-Rollback-NodejsApp]# cat deployment.yml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nodejs-deployment
+  labels:
+    app: nodejs
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0%
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: nodejs
+  template:
+    metadata:
+      labels:
+        app: nodejs
+    spec:
+      containers:
+      - name: nodejs-deployment
+        image: maheshroshini08/nodejs-helloworld:v1
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+
+
+[root@ip-172-31-41-248 RollingUpdate-Rollback-NodejsApp]# kubectl apply -f deployment.yml --record
+
+[root@ip-172-31-41-248 RollingUpdate-Rollback-NodejsApp]# kubectl rollout status deployment nodejs-deployment
+Waiting for deployment "nodejs-deployment" rollout to finish: 0 of 2 updated replicas are available...
+Waiting for deployment "nodejs-deployment" rollout to finish: 1 of 2 updated replicas are available...
+
+[root@ip-172-31-41-248 RollingUpdate-Rollback-NodejsApp]# kubectl rollout history deployment nodejs-deployment
+deployment.apps/nodejs-deployment
+REVISION  CHANGE-CAUSE
+1         kubectl apply --filename=deployment.yml --record=true
+
+[root@ip-172-31-41-248 RollingUpdate-Rollback-NodejsApp]# cat service.yml
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nodejs-service
+spec:
+  type: LoadBalancer
+  selector:
+    app: nodejs
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+[root@ip-172-31-41-248 RollingUpdate-Rollback-NodejsApp]# kubectl apply -f service.yml
+nodejs-service   LoadBalancer   10.100.184.137   a796fd6713dbc46bda55da75cf6a1c16-2109254087.us-east-2.elb.amazonaws.com   8080:32087/TCP   3s
+
+
+CHeck in Loadbalanacer in EC2 and wait till both the nodes are in service***
+
+http://a796fd6713dbc46bda55da75cf6a1c16-2109254087.us-east-2.elb.amazonaws.com:8080/  -- now i can see
+
+Hello World
+
+
+Now let's upgrade the image to v2***
+
+
+[root@ip-172-31-41-248 RollingUpdate-Rollback-NodejsApp]# kubectl set image deployment nodejs-deployment nodejs-deployment=maheshroshini08/nodejs-helloworld:v2
+deployment.apps/nodejs-deployment image updated
+[root@ip-172-31-41-248 RollingUpdate-Rollback-NodejsApp]# kubectl rollout history deployment nodejs-deployment
+deployment.apps/nodejs-deployment
+REVISION  CHANGE-CAUSE
+1         kubectl apply --filename=deployment.yml --record=true
+2         kubectl apply --filename=deployment.yml --record=true
+
+NOw we if chck with same LB, we will see the new output ---- Hello Word ...!
+
+[root@ip-172-31-41-248 RollingUpdate-Rollback-NodejsApp]# kubectl rollout history deployment nodejs-deployment --revision=2
+deployment.apps/nodejs-deployment with revision #2
+Pod Template:
+  Labels:       app=nodejs
+        pod-template-hash=c474c7b78
+  Annotations:  kubernetes.io/change-cause: kubectl apply --filename=deployment.yml --record=true
+  Containers:
+   nodejs-deployment:
+    Image:      maheshroshini08/nodejs-helloworld:v2
+    Port:       8080/TCP
+    Host Port:  0/TCP
+    Environment:        <none>
+    Mounts:     <none>
+  Volumes:      <none>
+
+
+[root@ip-172-31-41-248 RollingUpdate-Rollback-NodejsApp]# kubectl rollout undo deployment nodejs-deployment --to-revision=1
+deployment.apps/nodejs-deployment rolled back
+[root@ip-172-31-41-248 RollingUpdate-Rollback-NodejsApp]# kubectl rollout status deployment nodejs-deployment
+deployment "nodejs-deployment" successfully rolled out
+[root@ip-172-31-41-248 RollingUpdate-Rollback-NodejsApp]# kubectl rollout history deployment nodejs-deployment
+deployment.apps/nodejs-deployment
+REVISION  CHANGE-CAUSE
+2         kubectl apply --filename=deployment.yml --record=true
+3         kubectl apply --filename=deployment.yml --record=true
+
+[root@ip-172-31-41-248 RollingUpdate-Rollback-NodejsApp]# kubectl rollout history deployment nodejs-deployment --revision=3
+deployment.apps/nodejs-deployment with revision #3
+Pod Template:
+  Labels:       app=nodejs
+        pod-template-hash=6f479cd5f
+  Annotations:  kubernetes.io/change-cause: kubectl apply --filename=deployment.yml --record=true
+  Containers:
+   nodejs-deployment:
+    Image:      maheshroshini08/nodejs-helloworld:v1
+
+===============================================================================================================
+
+Blue-Green Deployment::
+-------------------------------
+
+[root@ip-172-31-41-248 ~]# git clone https://github.com/Naresh240/Blue-Green-Deployment-NodejsApp.git
+
+
+Here we use 2 deployemnt and 2 service files***
+
+
+[root@ip-172-31-41-248 Blue-Green-Deployment-NodejsApp]# cat deployment-blue.yml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nodejs-deployment-blue
+  labels:
+    app: nodejs
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nodejs
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: nodejs
+        version: v1
+    spec:
+      containers:
+      - name: nodejs-blue
+        image: maheshroshini08/nodejs-helloworld:v1
+        ports:
+        - containerPort: 8080
+[root@ip-172-31-41-248 Blue-Green-Deployment-NodejsApp]# cat service-blue.yml
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nodejs-service-blue
+spec:
+  type: LoadBalancer
+  selector:
+    app: nodejs
+    version: v1
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+
+Similary change image name with "v2" in deployment-green.yml file**** 
+
+
+[root@ip-172-31-41-248 Blue-Green-Deployment-NodejsApp]# cat deployment-green.yml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nodejs-deployment-green
+  labels:
+    app: nodejs
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nodejs
+      version: v2
+  template:
+    metadata:
+      labels:
+        app: nodejs
+        version: v2
+    spec:
+      containers:
+      - name: nodejs-green
+        image: maheshroshini08/nodejs-helloworld:v2
+        ports:
+        - containerPort: 8080
+
+[root@ip-172-31-41-248 Blue-Green-Deployment-NodejsApp]# kubectl apply -f deployment-blue.yml
+deployment.apps/nodejs-deployment-blue created
+[root@ip-172-31-41-248 Blue-Green-Deployment-NodejsApp]# kubectl apply -f service-blue.yml
+service/nodejs-service-blue created
+
+
+http://a7ca951a45bf34acf911fd2bdd67421f-79412995.us-east-2.elb.amazonaws.com:8080/  -->output : hello World
+
+Let's deploy the same with ingress...
+
+[root@ip-172-31-41-248 Blue-Green-Deployment-NodejsApp]# kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/aws-alb-ingress-controller/master/docs/examples/rbac-role.yaml
+clusterrole.rbac.authorization.k8s.io/alb-ingress-controller created
+clusterrolebinding.rbac.authorization.k8s.io/alb-ingress-controller created
+serviceaccount/alb-ingress-controller created
+
+NOw need to create service account --- copy IAM policy arn which we created  to the below content
+
+alb-ingress-controller-policy - arn:aws:iam::305286667209:policy/alb-ingress-controller-policy
+
+
+
+[root@ip-172-31-41-248 Blue-Green-Deployment-NodejsApp]# eksctl create iamserviceaccount \
+>     --region us-east-2 \
+>     --name alb-ingress-controller \
+>     --namespace kube-system \
+>     --cluster eksdemo1 \
+>     --attach-policy-arn arn:aws:iam::305286667209:policy/alb-ingress-controller-policy \
+> --override-existing-serviceaccounts \
+>     --approve
+
+
+[root@ip-172-31-41-248 Blue-Green-Deployment-NodejsApp]# eksctl  get iamserviceaccount --cluster eksdemo1 --region us-east-2
+2021-06-28 17:36:51 [ℹ]  eksctl version 0.54.0
+2021-06-28 17:36:51 [ℹ]  using region us-east-2
+NAMESPACE       NAME                    ROLE ARN
+kube-system     alb-ingress-controller  arn:aws:iam::305286667209:role/eksctl-eksdemo1-addon-iamserviceaccount-kube-Role1-TJBZ1DN3O8C3
+
+------------------------------------
+Deploy ALB Ingress Controller
+
+[root@ip-172-31-41-248 Blue-Green-Deployment-NodejsApp]# kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/aws-alb-ingress-controller/master/docs/examples/alb-ingress-controller.yaml
+
+-------------------------------
+Verify Deployment
+
+[root@ip-172-31-41-248 Blue-Green-Deployment-NodejsApp]# kubectl get deploy -n kube-system
+NAME                     READY   UP-TO-DATE   AVAILABLE   AGE
+alb-ingress-controller   0/1     1            0           43s
+
+---------------------------
+Edit ALB Ingress Controller Manifest:
+
+[root@ip-172-31-41-248 Blue-Green-Deployment-NodejsApp]# kubectl edit deploy alb-ingress-controller -n kube-system
+
+    spec:
+      containers:
+      - args:
+        - --ingress-class=alb
+        - --cluster-name=eksdemo1
+
+[root@ip-172-31-41-248 Blue-Green-Deployment-NodejsApp]# kubectl get deploy -n kube-system
+NAME                     READY   UP-TO-DATE   AVAILABLE   AGE
+alb-ingress-controller   1/1     1            1           2m28s
+
+
+[root@ip-172-31-41-248 Blue-Green-Deployment-NodejsApp]# cat ingress.yml
+---
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: nodejs-ingress
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /
+        backend:
+          serviceName: nodejs-service-blue  **** this is the important part, to change traffice we make it "green" *****
+          servicePort:  8080
+
+1st we deploy with """blue traffic""", 
+
+
+[root@ip-172-31-41-248 Blue-Green-Deployment-NodejsApp]# kubectl apply -f ingress.yml
+ingress.networking.k8s.io/nodejs-ingress created
+[root@ip-172-31-41-248 Blue-Green-Deployment-NodejsApp]# kubectl get ingress
+NAME             CLASS    HOSTS   ADDRESS   PORTS   AGE
+nodejs-ingress   <none>   *                 80      5s
+
+[root@ip-172-31-41-248 Blue-Green-Deployment-NodejsApp]# kubectl get pods -n kube-system
+NAME                                      READY   STATUS    RESTARTS   AGE
+alb-ingress-controller-7f699ff874-dhrl2   1/1     Running   0          6m7s
+
+[root@ip-172-31-41-248 Blue-Green-Deployment-NodejsApp]# kubectl logs alb-ingress-controller-7f699ff874-dhrl2 -n kube-system
+
+E0628 17:46:33.400632       1 controller.go:217] kubebuilder/controller "msg"="Reconciler error" "error"="failed to build LoadBalancer configuration due to failed to resolve 2 qualified subnet with at least 8 free IP Addresses for ALB. Subnets must contains these tags: 'kubernetes.io/cluster/eksdemo1': ['shared' or 'owned'] and 'kubernetes.io/role/elb': ['' or '1']
+
+
+Now go to subnets of this cluster, add those values to  vpc and public subnets and add kubernetes.io/cluster/eksdemo1 owned  and kubernetes.io/role/elb 1
+
+[root@ip-172-31-41-248 Blue-Green-Deployment-NodejsApp]# kubectl delete -f ingress.yml
+[root@ip-172-31-41-248 Blue-Green-Deployment-NodejsApp]# kubectl apply -f ingress.yml
+
+[root@ip-172-31-41-248 Blue-Green-Deployment-NodejsApp]# kubectl get ingress
+NAME             CLASS    HOSTS   ADDRESS                                                                  PORTS   AGE
+nodejs-ingress   <none>   *       6ad0ef5b-default-nodejsing-3ba2-1161380364.us-east-2.elb.amazonaws.com   80      49s
+
+
+Now if we check in LB, we can see this ALB,
+http://6ad0ef5b-default-nodejsing-3ba2-1161380364.us-east-2.elb.amazonaws.com/  we can see the URL*** Hello World
+
+
+If we check the LB: http://a7ca951a45bf34acf911fd2bdd67421f-79412995.us-east-2.elb.amazonaws.com:8080/ we can see Hello World**
+
+
+WE ARE GIVING 100% TRAFFIC TO BLUE DEPLOYMENT *****************************
+
+
+[root@ip-172-31-41-248 Blue-Green-Deployment-NodejsApp]# kubectl apply -f deployment-green.yml
+[root@ip-172-31-41-248 Blue-Green-Deployment-NodejsApp]# kubectl apply -f service-green.yml
+
+
+[root@ip-172-31-41-248 Blue-Green-Deployment-NodejsApp]# kubectl get deploy
+NAME                      READY   UP-TO-DATE   AVAILABLE   AGE
+nodejs-deployment-blue    2/2     2            2           44m
+nodejs-deployment-green   2/2     2            2           68s
+[root@ip-172-31-41-248 Blue-Green-Deployment-NodejsApp]# kubectl get svc
+NAME                   TYPE           CLUSTER-IP       EXTERNAL-IP                                                              PORT(S)          AGE
+kubernetes             ClusterIP      10.100.0.1       <none>                                                                   443/TCP          113m
+nodejs-service-blue    LoadBalancer   10.100.205.245   a7ca951a45bf34acf911fd2bdd67421f-79412995.us-east-2.elb.amazonaws.com    8080:30504/TCP   42m
+nodejs-service-green   LoadBalancer   10.100.185.175   a94f40682077841f39d7773a91904483-502944106.us-east-2.elb.amazonaws.com   8080:31076/TCP   18s
+
+Now if we check with 2nd Classic Loadbalancer http://a94f40682077841f39d7773a91904483-502944106.us-east-2.elb.amazonaws.com:8080/  it is up and showing output Hello World......!
+
+Let's switch the traffic to new LB..... by changing the content in the ""ingress.yml""" file***
+
+
+Before:
+        backend:
+          serviceName: nodejs-service-blue
+After:
+        backend:
+          serviceName: nodejs-service-green
+
+[root@ip-172-31-41-248 Blue-Green-Deployment-NodejsApp]# vi ingress.yml
+[root@ip-172-31-41-248 Blue-Green-Deployment-NodejsApp]# kubectl apply -f ingress.yml
+
+Now if i check the ALB, we can see the output- http://6ad0ef5b-default-nodejsing-3ba2-1161380364.us-east-2.elb.amazonaws.com/ 
+
+Hello World......!
 
