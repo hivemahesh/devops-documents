@@ -387,4 +387,229 @@ After:
 Now if i check the ALB, we can see the output- http://6ad0ef5b-default-nodejsing-3ba2-1161380364.us-east-2.elb.amazonaws.com/ 
 
 Hello World......!
+======================================================================================================================================================
 
+Canary Deployment::
+---------------------------------
+
+Entire Naresh's kubernetes docs are available here:: https://github.com/Naresh240/kubernetes.git
+
+In this check for "deployment-strategies", we can get canary deployment
+
+[root@ip-172-31-45-186 ~]# git clone https://github.com/Naresh240/kubernetes.git
+
+[root@ip-172-31-45-186 deployment-strategies]# pwd
+/root/kubernetes/deployment-strategies
+[root@ip-172-31-45-186 deployment-strategies]# ls
+Blue-Green-Deployment  Canary-Deployment  RollingUpdate-Rollback
+
+[root@ip-172-31-45-186 Canary-Deployment]# pwd
+/root/kubernetes/deployment-strategies/Canary-Deployment
+[root@ip-172-31-45-186 Canary-Deployment]# ls
+deployment-v1.yml  Dockerfile        ingress.yml      package.json  server.js
+deployment-v2.yml  external-dns.yml  istio-rules.yml  README.md     service.yml
+
+
+We have 2 deployment files, but we have only one "service file"" ... 
+
+Here we are going to manage the traffic by using ""istio-rules"""". In this we use "weight" to move the traffic from one deployment to another deployment***
+
+Pre-requisties:
+===================
+- Install GIT
+- EKS Cluster
+- Install ALB-Ingress-Controller
+- Install Istio
+- Request a Cerficate using Certificate Manager
+- Create Hosted Zone with our Domain Name
+- External DNS Setup
+
+Istio is designed for extensibility and can handle a diverse range of deployment needs. Istio's control plane runs on Kubernetes, and you can add applications deployed in that cluster to your mesh, extend the mesh to other clusters, or even connect VMs or other endpoints running outside of Kubernetes.
+
+
+
+Intsalling Istio:   https://github.com/Naresh240/Istio-Installation
+================================
+1.
+Before we can get started configuring Istio we’ll need to first install the command line tools that you will interact with.
+
+echo 'export ISTIO_VERSION="1.5.2"' >> ${HOME}/.bash_profile
+source ${HOME}/.bash_profile
+mkdir environment
+cd ~/environment
+curl -L https://istio.io/downloadIstio | sh -
+
+[root@ip-172-31-45-186 ~]# echo 'export ISTIO_VERSION="1.5.2"' >> ${HOME}/.bash_profile
+[root@ip-172-31-45-186 ~]# source ${HOME}/.bash_profile
+[root@ip-172-31-45-186 ~]# mkdir environment
+[root@ip-172-31-45-186 ~]# cd ~/environment
+[root@ip-172-31-45-186 environment]# curl -L https://istio.io/downloadIstio | sh -
+
+Istio has been successfully downloaded into the istio-1.5.2 folder on your system.
+[root@ip-172-31-45-186 environment]# ls
+istio-1.5.2
+
+
+2. The installation directory contains: *Installation YAML files for Kubernetes in install/kubernetes *Sample applications in samples/ *The istioctl client binary in the bin/ directory (istioctl is used when manually injecting Envoy as a sidecar proxy).
+
+[root@ip-172-31-45-186 environment]# cd ${HOME}/environment/istio-${ISTIO_VERSION}
+[root@ip-172-31-45-186 istio-1.5.2]# sudo cp -v bin/istioctl /usr/bin/
+‘bin/istioctl’ -> ‘/usr/bin/istioctl’
+[root@ip-172-31-45-186 istio-1.5.2]# istioctl version --remote=false
+1.5.2
+
+
+3. Istio will be installed in the istio-system namespace. ***
+
+[root@ip-172-31-45-186 istio-1.5.2]# istioctl manifest apply --set profile=demo
+
+[root@ip-172-31-45-186 istio-1.5.2]# kubectl -n istio-system get svc
+NAME                        TYPE           CLUSTER-IP       EXTERNAL-IP                                                              PORT(S)                                                                                                                                      AGE
+grafana                     ClusterIP      10.100.166.231   <none>                                                                   3000/TCP                                                                                                                                     9s
+istio-egressgateway         ClusterIP      10.100.10.111    <none>                                                                   80/TCP,443/TCP,15443/TCP                                                                                                                     11s
+istio-ingressgateway        LoadBalancer   10.100.182.194   abff420aa1a35413ab8124c78732a166-608716309.us-east-2.elb.amazonaws.com   15020:30874/TCP,80:30322/TCP,443:32172/TCP,15029:30829/TCP,15030:31062/TCP,15031:32538/TCP,15032:30110/TCP,31400:31552/TCP,15443:32301/TCP   11s
+istio-pilot                 ClusterIP      10.100.246.111   <none>                                                                   15010/TCP,15011/TCP,15012/TCP,8080/TCP,15014/TCP,443/TCP                                                                                     28s
+istiod                      ClusterIP      10.100.114.201   <none>                                                                   15012/TCP,443/TCP                                                                                                                            28s
+jaeger-agent                ClusterIP      None             <none>                                                                   5775/UDP,6831/UDP,6832/UDP                                                                                                                   9s
+jaeger-collector            ClusterIP      10.100.243.227   <none>                                                                   14267/TCP,14268/TCP,14250/TCP                                                                                                                9s
+jaeger-collector-headless   ClusterIP      None             <none>                                                                   14250/TCP                                                                                                                                    9s
+jaeger-query                ClusterIP      10.100.154.59    <none>                                                                   16686/TCP                                                                                                                                    9s
+kiali                       ClusterIP      10.100.66.152    <none>                                                                   20001/TCP                                                                                                                                    9s
+prometheus                  ClusterIP      10.100.77.150    <none>                                                                   9090/TCP                                                                                                                                     9s
+tracing                     ClusterIP      10.100.252.154   <none>                                                                   80/TCP                                                                                                                                       9s
+zipkin                      ClusterIP      10.100.199.196   <none>                                                                   9411/TCP                                                                                                                                     9s
+
+
+[root@ip-172-31-45-186 istio-1.5.2]# kubectl -n istio-system get pods
+NAME                                    READY   STATUS    RESTARTS   AGE
+grafana-57cb8b8d44-zfl84                1/1     Running   0          92s
+istio-egressgateway-c5bc4f66-47dv6      1/1     Running   0          93s
+istio-ingressgateway-7c4d7d88d4-czmbj   1/1     Running   0          93s  ** in our case we need this*******
+istio-tracing-7fcc6f5848-bm7bh          1/1     Running   0          91s
+istiod-64878565f8-kwdmd                 1/1     Running   0          110s
+kiali-6875bdf78-cck6q                   1/1     Running   0          91s
+prometheus-d8d9467dd-gbpbg              2/2     Running   0          91s
+
+By default it will create so many services and pods. ***
+
+
+We will use our above cloned repo::
+[root@ip-172-31-45-186 ~]# git clone https://github.com/Naresh240/kubernetes.git
+
+[root@ip-172-31-45-186 Canary-Deployment]# pwd
+/root/kubernetes/deployment-strategies/Canary-Deployment
+
+We will use our 2 images with different versions** v1 and v2--- in our 2 deployment files****
+
+maheshroshini08/nodejs-helloworld:v1 and maheshroshini08/nodejs-helloworld:v2
+
+[root@ip-172-31-45-186 Canary-Deployment]# pwd
+/root/kubernetes/deployment-strategies/Canary-Deployment
+
+[root@ip-172-31-45-186 Canary-Deployment]# cat service.yml
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nodejs
+  labels:
+    app: nodejs
+spec:
+  type: LoadBalancer
+  selector:
+    app: nodejs
+  ports:
+  - name: http
+    port: 8080
+
+Note:: HERE WE ARE HAVING ONLY ONE SERVICE YML FILE AND USING SAME "SELECTOR LABEL" IN BOTH THE DEPLOYMENTS******
+
+Here as we have only one service.yml file, service file will get confuse which deployment to connect as they have same selector***
+
+So to resolve this we use "istio-rules****************** "
+
+[root@ip-172-31-45-186 Canary-Deployment]# kubectl apply -f deployment-v1.yml
+deployment.apps/nodejs-v1 created
+[root@ip-172-31-45-186 Canary-Deployment]# kubectl apply -f deployment-v2.yml
+deployment.apps/nodejs-v2 created
+[root@ip-172-31-45-186 Canary-Deployment]# kubectl apply -f ingress.yml
+ingress.networking.k8s.io/nodejs-ingress configured
+[root@ip-172-31-45-186 Canary-Deployment]# kubectl apply -f service.yml
+service/nodejs created
+
+[root@ip-172-31-45-186 Canary-Deployment]# kubectl apply -f istio-rules.yml
+gateway.networking.istio.io/nodejs-gateway created
+virtualservice.networking.istio.io/nodejs created
+destinationrule.networking.istio.io/nodejs created
+
+
+[root@ip-172-31-45-186 Canary-Deployment]# kubectl get deploy
+NAME        READY   UP-TO-DATE   AVAILABLE   AGE
+nodejs-v1   1/1     1            1           41s
+nodejs-v2   1/1     1            1           35s
+
+[root@ip-172-31-45-186 Canary-Deployment]# kubectl get ingress
+NAME             CLASS    HOSTS   ADDRESS                                                                  PORTS   AGE
+nodejs-ingress   <none>   *       6ad0ef5b-default-nodejsing-3ba2-1244134030.us-east-2.elb.amazonaws.com   80      121m
+
+[root@ip-172-31-45-186 Canary-Deployment]# kubectl get svc
+NAME         TYPE           CLUSTER-IP      EXTERNAL-IP                                                              PORT(S)          AGE
+kubernetes   ClusterIP      10.100.0.1      <none>                                                                   443/TCP          158m
+nodejs       LoadBalancer   10.100.191.99   ad2f39578b7874d229abea838e5b58c2-114466821.us-east-2.elb.amazonaws.com   8080:30664/TCP   46s
+
+NOw we can see the output of the v1: --- 
+
+http://ad2f39578b7874d229abea838e5b58c2-114466821.us-east-2.elb.amazonaws.com:8080/  Hello WOrld
+
+
+[root@ip-172-31-45-186 Canary-Deployment]# cat istio-rules.yml
+  gateways:
+  - nodejs-gateway
+  http:
+  - route:
+    - destination:
+        host: nodejs   ---> this is the service file name we are reffering
+        subset: v1
+      weight: 80
+    - destination:
+        host: nodejs  --> this is the service file name we are referering
+        subset: v2
+      weight: 20
+
+##################################
+kind: Service
+metadata:
+  name: nodejs
+  labels:
+    app: nodejs
+
+
+As the istio-rules in 80 and 20 we are not able to see the differenece, so we will make it as 50:50
+
+
+[root@ip-172-31-45-186 Canary-Deployment]# kubectl apply -f istio-rules.yml
+gateway.networking.istio.io/nodejs-gateway unchanged
+virtualservice.networking.istio.io/nodejs configured   *************AFTER THE CHANGES AND RE-APPLY WE GOT THIS ONLY CHANGED***
+destinationrule.networking.istio.io/nodejs unchanged
+
+
+Now, lets see the traffic in URL, we can see both the versions every now and then whenever we refresh the page***
+
+After 100% traffic movement happen to v2 in istio-rules.yml file, we will delete the deployment v1 ************
+
+i.e.,
+
+   - destination:
+        host: nodejs
+        subset: v1
+      weight: 00
+    - destination:
+        host: nodejs
+        subset: v2
+      weight: 100
+
+
+[root@ip-172-31-45-186 Canary-Deployment]# kubectl delete -f deployment-v1.yml
+deployment.apps "nodejs-v1" deleted
+
+Now if i check the URL is pointing completely to v2 *****
