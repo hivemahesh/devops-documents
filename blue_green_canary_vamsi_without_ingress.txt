@@ -1,0 +1,219 @@
+1. Create EC2 instance, attach IAM role and create EKS cluster
+
+2. There are 3 different types of deployment strategy:
+	a. Rolling Update and ROllback
+	b. Blue-green deployment
+	c. Canary Deployment
+
+Rolling Update Deployment:  Refer-- https://www.bluematador.com/blog/kubernetes-deployments-rolling-update-configuration
+----------------------------
+RollingUpdate- Noew pods are added grdually and old pods are terminated gradually
+Recreate: ALl old pods are terminated brefore any new pods are added
+
+In most cases RollingUpdate is the preferable update strategy for Deployments. Recreate can be useful if wea re running a pod as a singleton and having a duplicate pod for even a few seconds is not acceptable.
+
+When using RU strategy, there are 2 two more options that let you fine-tune the update process:
+  maxSurge: The no. of pods that can be created above the desired amount of pods during an update
+  maxUnavailable: The no. of pods that can be unavailable during the update process
+Both maxSurge and maxUnavailable can be specified as either an integer (e.g. 2) or a percentage (e.g. 50%), and they cannot both be zero. When specified as an integer, it represents the actual number of pods; when specifying a percentage, that percentage of the desired number of pods is used, rounded down. For example, If you were using the default values of 25% for both maxSurge and maxUnavailable, and applied an update to a Deployment with 8 pods, then maxSurge would be 2 pods, and maxUnavailable would also be 2 pods. That means that during the update process, the following conditions will be met:
+
+At most 10 pods (8 desired pods + 2 maxSurge pods) will be Ready during the update
+At least 6 pods (8 desired pods - 2 maxUnavailable pods) will always be Ready during the update
+
+[root@ip-172-31-44-57 ~]# git clone https://github.com/cloudtechmasters/Rollingupdate-Rollback-NodejsApp.git
+
+Added my image----
+[root@ip-172-31-44-57 Rollingupdate-Rollback-NodejsApp]# cat deployment.yml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nodejs-deployment
+  labels:
+    app: nodejs
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 50%
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: nodejs
+  template:
+    metadata:
+      labels:
+        app: nodejs
+    spec:
+      containers:
+      - name: nodejs-deployment
+        image: maheshroshini08/nodejs-helloworld:v1
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+
+[root@ip-172-31-44-57 Rollingupdate-Rollback-NodejsApp]# kubectl apply -f deployment.yml --record
+[root@ip-172-31-44-57 Rollingupdate-Rollback-NodejsApp]# kubectl apply -f service.yml
+[root@ip-172-31-44-57 Rollingupdate-Rollback-NodejsApp]# kubectl get deploy
+NAME                READY   UP-TO-DATE   AVAILABLE   AGE
+nodejs-deployment   2/2     2            2           30s
+
+
+[root@ip-172-31-44-57 Rollingupdate-Rollback-NodejsApp]# kubectl get svc
+NAME             TYPE           CLUSTER-IP     EXTERNAL-IP                                                               PORT(S)          AGE
+kubernetes       ClusterIP      10.100.0.1     <none>                                                                    443/TCP          38m
+nodejs-service   LoadBalancer   10.100.82.30   aaad248f5ba2940e6af8aa04f1987433-1960296399.us-east-2.elb.amazonaws.com   8080:30693/TCP   2m8s
+
+
+Wait until out instances are "in-service" in LB, 
+http://aaad248f5ba2940e6af8aa04f1987433-1960296399.us-east-2.elb.amazonaws.com:8080/  ---> hello World
+
+[root@ip-172-31-44-57 Rollingupdate-Rollback-NodejsApp]# kubectl rollout status deployment nodejs-deployment
+deployment "nodejs-deployment" successfully rolled out
+[root@ip-172-31-44-57 Rollingupdate-Rollback-NodejsApp]# kubectl rollout history deployment nodejs-deployment
+deployment.apps/nodejs-deployment
+REVISION  CHANGE-CAUSE
+1         kubectl apply --filename=deployment.yml --record=true
+
+[root@ip-172-31-44-57 Rollingupdate-Rollback-NodejsApp]# kubectl rollout history deployment nodejs-deployment --revision=1
+deployment.apps/nodejs-deployment with revision #1
+Pod Template:
+  Labels:       app=nodejs
+        pod-template-hash=6f479cd5f
+  Annotations:  kubernetes.io/change-cause: kubectl apply --filename=deployment.yml --record=true
+  Containers:
+   nodejs-deployment:
+    Image:      maheshroshini08/nodejs-helloworld:v1
+    Port:       8080/TCP
+    Host Port:  0/TCP
+    Environment:        <none>
+    Mounts:     <none>
+  Volumes:      <none>
+
+-----------------------------------------------------------
+[root@ip-172-31-44-57 Rollingupdate-Rollback-NodejsApp]# kubectl set image deployment nodejs-deployment nodejs-deployment=maheshroshini08/nodejs-helloworld:v2
+deployment.apps/nodejs-deployment image updated
+[root@ip-172-31-44-57 Rollingupdate-Rollback-NodejsApp]# kubectl rollout status deployment nodejs-deployment
+deployment "nodejs-deployment" successfully rolled out
+[root@ip-172-31-44-57 Rollingupdate-Rollback-NodejsApp]# kubectl rollout history deployment nodejs-deployment
+deployment.apps/nodejs-deployment
+REVISION  CHANGE-CAUSE
+1         kubectl apply --filename=deployment.yml --record=true
+2         kubectl apply --filename=deployment.yml --record=true
+
+NOw if i check http://aaad248f5ba2940e6af8aa04f1987433-1960296399.us-east-2.elb.amazonaws.com:8080/  output: Hello world ...!
+
+[root@ip-172-31-44-57 Rollingupdate-Rollback-NodejsApp]# kubectl rollout undo deployment nodejs-deployment --to-revision=1
+[root@ip-172-31-44-57 Rollingupdate-Rollback-NodejsApp]# kubectl rollout history deployment nodejs-deployment
+deployment.apps/nodejs-deployment
+REVISION  CHANGE-CAUSE
+2         kubectl apply --filename=deployment.yml --record=true
+3         kubectl apply --filename=deployment.yml --record=true
+
+http://aaad248f5ba2940e6af8aa04f1987433-1960296399.us-east-2.elb.amazonaws.com:8080/  output: Hello world  --> v1 output*****
+
+
+=================================================================================================================
+
+Blue-Green Deployment::
+========================
+Blue green deployment is an application release model that that gradually transfers user traffic from a pervious version of an app or microservice to a nearly identical new release-both of which are RUNNING IN PRODUCTION****
+
+
+THere will be deployment manifest files for blue and green deployment separately.
+
+Forthe 1st time, we deploy blue environment, whenever we wan to do another deployment for version v2 then deploy the green environemnt. Both are deployed in same environment(either dev/stage/production)
+
+Once green environment is up and running, we terminate blue environment***
+
+
+[root@ip-172-31-44-57 ~]# git clone https://github.com/cloudtechmasters/Blue-Green-Deployment-NodejsApp.git
+
+Change in both the deployment for my image***
+
+[root@ip-172-31-44-57 Blue-Green-Deployment-NodejsApp]# kubectl apply -f deployment-blue.yml
+deployment.apps/nodejs-deployment-blue created
+[root@ip-172-31-44-57 Blue-Green-Deployment-NodejsApp]# kubectl apply -f service-blue.yml
+service/nodejs-service-blue created
+
+[root@ip-172-31-44-57 Blue-Green-Deployment-NodejsApp]# kubectl get deploy
+NAME                     READY   UP-TO-DATE   AVAILABLE   AGE
+nodejs-deployment-blue   2/2     2            2           46s
+[root@ip-172-31-44-57 Blue-Green-Deployment-NodejsApp]# kubectl get svc
+NAME                  TYPE           CLUSTER-IP       EXTERNAL-IP                                                              PORT(S)          AGE
+kubernetes            ClusterIP      10.100.0.1       <none>                                                                   443/TCP          69m
+nodejs-service-blue   LoadBalancer   10.100.118.254   a1846ae5419284fce97cea34de805561-200849594.us-east-2.elb.amazonaws.com   8080:30605/TCP   41s
+
+http://a1846ae5419284fce97cea34de805561-200849594.us-east-2.elb.amazonaws.com:8080/ v1 output: hello world
+
+
+######################################
+
+NOw let's deploy the green deployment---
+
+[root@ip-172-31-44-57 Blue-Green-Deployment-NodejsApp]# kubectl apply -f deployment-green.yml
+deployment.apps/nodejs-deployment-green created
+[root@ip-172-31-44-57 Blue-Green-Deployment-NodejsApp]# kubectl apply -f service-green.yml
+service/nodejs-service-green created
+
+Now if we see in LB, we see 2 classic LB are running****
+
+[root@ip-172-31-44-57 Blue-Green-Deployment-NodejsApp]# kubectl get svc
+NAME                   TYPE           CLUSTER-IP       EXTERNAL-IP                                                              PORT(S)          AGE
+nodejs-service-blue    LoadBalancer   10.100.118.254   a1846ae5419284fce97cea34de805561-200849594.us-east-2.elb.amazonaws.com   8080:30605/TCP   3m3s
+nodejs-service-green   LoadBalancer   10.100.250.54    a7735572d2ca3458a945fc2a5b1532fb-68800120.us-east-2.elb.amazonaws.com    8080:32025/TCP   17s
+
+Note: if we use NodePort means then we need to give 2 different ports to access same IP address****
+
+
+blue: http://a1846ae5419284fce97cea34de805561-200849594.us-east-2.elb.amazonaws.com:8080/  output: hello world
+
+green: http://a7735572d2ca3458a945fc2a5b1532fb-68800120.us-east-2.elb.amazonaws.com:8080/  output: Hello World......!
+
+[root@ip-172-31-44-57 ~]# kubectl get pods
+NAME                                       READY   STATUS    RESTARTS   AGE
+nodejs-deployment-blue-5757dbbbb9-6ks9w    1/1     Running   0          5m3s
+nodejs-deployment-blue-5757dbbbb9-h2274    1/1     Running   0          5m3s
+nodejs-deployment-green-75c78c9657-8hbb5   1/1     Running   0          2m16s
+nodejs-deployment-green-75c78c9657-tlvhm   1/1     Running   0          2m16s
+
+Both the deployment pods are running.... We tested and found green deployment is fine, so now we can switch to green deployment now and terminated blue deployment once everything is fine....
+
+We will terminate both blue deployment and svc file****
+
+[root@ip-172-31-44-57 Blue-Green-Deployment-NodejsApp]# kubectl delete -f deployment-blue.yml
+kdeployment.apps "nodejs-deployment-blue" deleted
+[root@ip-172-31-44-57 Blue-Green-Deployment-NodejsApp]# kubectl delete -f service-blue.yml
+service "nodejs-service-blue" deleted
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
