@@ -126,5 +126,160 @@ ip-192-168-62-161.us-east-2.compute.internal   Ready    <none>   30m   v1.19.6-e
 ip-192-168-8-9.us-east-2.compute.internal      Ready    <none>   30m   v1.19.6-eks-49a6c0   192.168.8.9      18.118.119.65    Amazon Linux 2   5.4.117-58.216.amzn2.x86_64   docker://19.3.13
 
 
+-------------------------------------------
+
+I will delete 2nd  nodegroup now, and see how the deploy will move from 2nd nodegroup to 1st nodegroup....
+
+(bcoz all the pods are deployed in 2nd nodegroup only so deleting it)
+
+[root@eks ~]# eksctl delete nodegroup --cluster=eksdemo1 --region=us-east-2 --name=node-group-2
+2021-07-05 17:29:53 [✔]  drained all nodes: [ip-192-168-2-155.us-east-2.compute.internal ip-192-168-24-203.us-east-2.compute.internal ip-192-168-40-215.us-east-2.compute.internal]
+2021-07-05 17:29:53 [ℹ]  will delete 1 nodegroups from cluster "eksdemo1"
+2021-07-05 17:29:54 [ℹ]  1 task: { 1 task: { delete nodegroup "node-group-2" [async] } }
+2021-07-05 17:29:54 [ℹ]  will delete stack "eksctl-eksdemo1-nodegroup-node-group-2"
+
+[root@eks ~]# kubectl get nodes
+NAME                                           STATUS                     ROLES    AGE     VERSION
+ip-192-168-2-155.us-east-2.compute.internal    Ready,SchedulingDisabled   <none>   3h21m   v1.19.6-eks-49a6c0
+ip-192-168-24-203.us-east-2.compute.internal   Ready,SchedulingDisabled   <none>   3h21m   v1.19.6-eks-49a6c0
+ip-192-168-40-215.us-east-2.compute.internal   Ready,SchedulingDisabled   <none>   3h20m   v1.19.6-eks-49a6c0
+ip-192-168-62-161.us-east-2.compute.internal   Ready                      <none>   3h38m   v1.19.6-eks-49a6c0
+ip-192-168-8-9.us-east-2.compute.internal      Ready                      <none>   3h38m   v1.19.6-eks-49a6c0
+
+Here the nodes are drained before they are deleted..
+
+-------------------------
+All nodes are cordoned and all pods are evicted from a nodegroup on deletion, but if you need to drain a nodegroup ""without deleting it"", run:
+
+eksctl drain nodegroup --cluster=<clusterName> --name=<nodegroupName>
+
+To check this, lets create a new nodegroup---
+
+eksctl create nodegroup --cluster=eksdemo1 \
+--region=us-east-2 \
+--name=node-group-3 \
+--node-type=t2.medium \
+--nodes=3 \
+--nodes-min=3 \
+--nodes-max=4 \
+--node-volume-size=10 \
+--ssh-access \
+--ssh-public-key=rosh_key \
+--managed \
+--asg-access \
+--external-dns-access \
+--full-ecr-access \
+--appmesh-access \
+--alb-ingress-access
+
+[root@eks ~]# kubectl get nodes -o wide
+NAME                                           STATUS   ROLES    AGE     VERSION              INTERNAL-IP      EXTERNAL-IP     OS-IMAGE         KERNEL-VERSION                CONTAINER-RUNTIME
+ip-192-168-10-195.us-east-2.compute.internal   Ready    <none>   78s     v1.19.6-eks-49a6c0   192.168.10.195   3.133.130.76    Amazon Linux 2   5.4.117-58.216.amzn2.x86_64   docker://19.3.13
+ip-192-168-31-231.us-east-2.compute.internal   Ready    <none>   81s     v1.19.6-eks-49a6c0   192.168.31.231   3.139.81.116    Amazon Linux 2   5.4.117-58.216.amzn2.x86_64   docker://19.3.13
+ip-192-168-56-238.us-east-2.compute.internal   Ready    <none>   79s     v1.19.6-eks-49a6c0   192.168.56.238   18.117.228.24   Amazon Linux 2   5.4.117-58.216.amzn2.x86_64   docker://19.3.13
+ip-192-168-62-161.us-east-2.compute.internal   Ready    <none>   3h51m   v1.19.6-eks-49a6c0   192.168.62.161   3.16.180.227    Amazon Linux 2   5.4.117-58.216.amzn2.x86_64   docker://19.3.13
+ip-192-168-8-9.us-east-2.compute.internal      Ready    <none>   3h51m   v1.19.6-eks-49a6c0   192.168.8.9      18.118.119.65   Amazon Linux 2   5.4.117-58.216.amzn2.x86_64   docker://19.3.13
+
+
+Now, lets drain the eksdemo1-ng-public and see how it works....
+
+[root@eks ~]# kubectl get pods -o wide
+NAME                           READY   STATUS    RESTARTS   AGE   IP               NODE                                           NOMINATED NODE   READINESS GATES
+nginx-2-69947fd9df-pc6lz       1/1     Running   0          12m   192.168.49.21    ip-192-168-62-161.us-east-2.compute.internal   <none>           <none>
+nginx-3-569f99496-4cjwp        1/1     Running   0          12m   192.168.40.78    ip-192-168-62-161.us-east-2.compute.internal   <none>           <none>
+nginx-d-6896cc6d7f-zft54       1/1     Running   0          12m   192.168.16.171   ip-192-168-8-9.us-east-2.compute.internal      <none>           <none>
+nginx-deploy-8588f9dfb-2xx24   1/1     Running   0          12m   192.168.1.83     ip-192-168-8-9.us-east-2.compute.internal      <none>           <none>
+
+
+[root@eks ~]# eksctl get nodegroup --cluster=eksdemo1 --region=us-east-2
+2021-07-05 17:45:27 [ℹ]  eksctl version 0.55.0
+2021-07-05 17:45:27 [ℹ]  using region us-east-2
+CLUSTER         NODEGROUP               STATUS  CREATED                 MIN SIZE        MAX SIZE        DESIRED CAPACITY        INSTANCE TYPE   IMAGE ID        ASG NAME
+eksdemo1        eksdemo1-ng-public      ACTIVE  2021-07-05T13:50:41Z    2               4               2                       t2.medium       AL2_x86_64      eks-08bd3b77-b493-da6d-1657-ccc417abcc3f
+eksdemo1        node-group-3            ACTIVE  2021-07-05T17:40:28Z    3               4               3                       t2.medium       AL2_x86_64      eks-1abd3be0-e481-fffb-a0c9-285c90df51f3
+[root@eks ~]#
+
+[root@eks ~]# eksctl drain nodegroup --cluster=eksdemo1 --region=us-east-2 --name=eksdemo1-ng-public
+2021-07-05 17:47:43 [ℹ]  eksctl version 0.55.0
+2021-07-05 17:47:43 [ℹ]  will drain 1 nodegroup(s) in cluster "eksdemo1"
+2021-07-05 17:47:43 [ℹ]  cordon node "ip-192-168-62-161.us-east-2.compute.internal"
+2021-07-05 17:47:43 [ℹ]  cordon node "ip-192-168-8-9.us-east-2.compute.internal"
+2021-07-05 17:47:58 [✔]  drained all nodes: [ip-192-168-62-161.us-east-2.compute.internal ip-192-168-8-9.us-east-2.compute.internal]
+
+Now the pods and deployments are moved to new nodegroup "node-group-3"
+
+[root@eks ~]# kubectl get nodes
+NAME                                           STATUS                     ROLES    AGE     VERSION
+ip-192-168-10-195.us-east-2.compute.internal   Ready                      <none>   7m29s   v1.19.6-eks-49a6c0
+ip-192-168-31-231.us-east-2.compute.internal   Ready                      <none>   7m32s   v1.19.6-eks-49a6c0
+ip-192-168-56-238.us-east-2.compute.internal   Ready                      <none>   7m30s   v1.19.6-eks-49a6c0
+ip-192-168-62-161.us-east-2.compute.internal   Ready,SchedulingDisabled   <none>   3h57m   v1.19.6-eks-49a6c0
+ip-192-168-8-9.us-east-2.compute.internal      Ready,SchedulingDisabled   <none>   3h57m   v1.19.6-eks-49a6c0
+
+Here the nodes are drained, but not deleted...... APART FROM DRAINED NOTHING WILL WORK... AGAIN WE HAVE TO EXECUTE DELTE NODEGRUP TO DLEETE THE NODES OF THAT PARTICULAR NODEGROUP...
+
+To uncordon a nodegroup, run:---- I DID NOT SEE ANY CHANGE AFTER EXECTION OF BELOW COMMAND...
+
+[root@eks ~]# eksctl drain nodegroup --cluster=eksdemo1 --region=us-east-2 --name=eksdemo1-ng-public --undo
+
+Still the same---
+
+ip-192-168-62-161.us-east-2.compute.internal   Ready,SchedulingDisabled   <none>   4h7m   v1.19.6-eks-49a6c0
+ip-192-168-8-9.us-east-2.compute.internal      Ready,SchedulingDisabled   <none>   4h7m   v1.19.6-eks-49a6c0
+
+so delete the nodegroup now... 
+
+[root@eks ~]# eksctl delete nodegroup --cluster=eksdemo1 --region=us-east-2 --name=eksdemo1-ng-public
+
+
+#######################################################################################################################
+
+B) Scaling::
+
+[root@eks ~]# eksctl get nodegroup --cluster=eksdemo1 --region=us-east-2
+CLUSTER         NODEGROUP               STATUS          CREATED                 MIN SIZE        MAX SIZE        DESIRED CAPACITY        INSTANCE TYPE   IMAGE ID  ASG NAME
+eksdemo1        eksdemo1-ng-public      DELETING        2021-07-05T13:50:41Z    2               4               2                       t2.medium       AL2_x86_64        eks-08bd3b77-b493-da6d-1657-ccc417abcc3f
+eksdemo1        node-group-3            ACTIVE          2021-07-05T17:40:28Z    3               4               3                       t2.medium       AL2_x86_64        eks-1abd3be0-e481-fffb-a0c9-285c90df51f3
+
+
+WILL INCREASE THE NODE FROM THE EXISTING GROUP FROM MIN=3 TO MIN=4 ****  {{ note: we can increase the node to higher level if it is within max. nodes specified... other wise it will not work
+But we can increase more by increasing the max. nodes from the nodegroup***
+
+-------------------------------
+
+To scale node group--- 
+
+eksctl scale nodegroup --cluster=<clusterName> --nodes=<desiredCount> --name=<nodegroupName> [ --nodes-min=<minSize> ] [ --nodes-max=<maxSize> ]
+
+[root@eks ~]# eksctl scale nodegroup --cluster=eksdemo1 --nodes=5 --name=node-group-3 --region=us-east-2
+2021-07-05 18:09:17 [ℹ]  scaling nodegroup "node-group-3" in cluster eksdemo1
+Error: failed to scale nodegroup for cluster "eksdemo1", error: InvalidParameterException: desired capacity 5 can't be greater than max size 4
+
+For this nodegroup currently we have min=3 and max=4, so will increase to min=4 so it will work.. if i need any desired no. means then i have to give both min and max size and then scale up in single command: with above syntax
+
+[root@eks ~]# eksctl scale nodegroup --cluster=eksdemo1 --nodes=4 --name=node-group-3 --region=us-east-2
+2021-07-05 18:11:51 [ℹ]  scaling nodegroup "node-group-3" in cluster eksdemo1
+
+
+Before: here node was 3. desired capacity**
+
+eksdemo1        node-group-3    ACTIVE  2021-07-05T17:40:28Z    3               4               3                       t2.medium       AL2_x86_64      eks-1abd3be0-e481-fffb-a0c9-285c90df51f3
+
+After: Here desired capacity increased to 4, and we will see the new node....
+
+eksdemo1        node-group-3    ACTIVE  2021-07-05T17:40:28Z    3               4               4                       t2.medium       AL2_x86_64      eks-1abd3be0-e481-fffb-a0c9-285c90df51f3
+
+
+[root@eks ~]# kubectl get nodes
+NAME                                           STATUS   ROLES    AGE    VERSION
+ip-192-168-10-195.us-east-2.compute.internal   Ready    <none>   33m    v1.19.6-eks-49a6c0
+ip-192-168-31-231.us-east-2.compute.internal   Ready    <none>   33m    v1.19.6-eks-49a6c0
+ip-192-168-54-137.us-east-2.compute.internal   Ready    <none>   115s   v1.19.6-eks-49a6c0   *************
+ip-192-168-56-238.us-east-2.compute.internal   Ready    <none>   33m    v1.19.6-eks-49a6c0
+
+NOw increased count of pods and new pod got deployed in new node too...
+
+[root@eks ~]# kubectl scale deployment nginx-deploy --replicas=5
+deployment.apps/nginx-deploy scaled
 
 
