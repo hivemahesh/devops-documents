@@ -282,4 +282,201 @@ NOw increased count of pods and new pod got deployed in new node too...
 [root@eks ~]# kubectl scale deployment nginx-deploy --replicas=5
 deployment.apps/nginx-deploy scaled
 
+#######################################################################################################################################################################################################################################################################
+
+Upgradation of NodeGroup::
+====================================
+
+
+[root@ip-172-31-42-218 ~]# git clone https://github.com/Naresh240/kubernetes.git
+
+[root@ip-172-31-42-218 kubernetes-updating-nodegroup]# pwd
+/root/kubernetes/cluster-upgradation/kubernetes-updating-nodegroup
+[root@ip-172-31-42-218 kubernetes-updating-nodegroup]# ls
+deployment.yml  nodejs-deployment.yml  README.md
+
+[root@ip-172-31-42-218 kubernetes-updating-nodegroup]# cat deployment.yml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+  labels:
+    app: nginx
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.14.2   ************
+        ports:
+        - containerPort: 80
+
+[root@ip-172-31-42-218 kubernetes-updating-nodegroup]# kubectl apply -f deployment.yml
+deployment.apps/nginx-deployment created
+[root@ip-172-31-42-218 kubernetes-updating-nodegroup]# kubectl get deploy
+NAME               READY   UP-TO-DATE   AVAILABLE   AGE
+nginx-deployment   3/3     3            3           18s
+[root@ip-172-31-42-218 kubernetes-updating-nodegroup]# kubectl get pods
+NAME                                READY   STATUS    RESTARTS   AGE
+nginx-deployment-66b6c48dd5-cwjnj   1/1     Running   0          19s
+nginx-deployment-66b6c48dd5-fvccl   1/1     Running   0          19s
+nginx-deployment-66b6c48dd5-vqwzm   1/1     Running   0          19s
+
+[root@ip-172-31-42-218 kubernetes-updating-nodegroup]# kubectl get pods -o wide
+NAME                                READY   STATUS    RESTARTS   AGE    IP               NODE                                           NOMINATED NODE   READINESS GATES
+nginx-deployment-66b6c48dd5-cwjnj   1/1     Running   0          5m5s   192.168.16.106   ip-192-168-5-163.us-east-2.compute.internal    <none>           <none>
+nginx-deployment-66b6c48dd5-fvccl   1/1     Running   0          5m5s   192.168.22.219   ip-192-168-5-163.us-east-2.compute.internal    <none>           <none>
+nginx-deployment-66b6c48dd5-vqwzm   1/1     Running   0          5m5s   192.168.56.237   ip-192-168-59-227.us-east-2.compute.internal   <none>           <none>
+
+[root@ip-172-31-42-218 kubernetes-updating-nodegroup]# kubectl get nodes
+NAME                                           STATUS   ROLES    AGE   VERSION
+ip-192-168-5-163.us-east-2.compute.internal    Ready    <none>   68m   v1.19.6-eks-49a6c0
+ip-192-168-59-227.us-east-2.compute.internal   Ready    <none>   69m   v1.19.6-eks-49a6c0
+
+
+Suppose we have this particular node group is full and want to add new node group, or this node group nodes are of low configuraiton and wan to have a new set of nodes with high configuration with another node group and move all the pods to this new node group***
+
+Upgradation of Node group--
+----------------------
+1. Creaet a new node group ex: eksdemo-newnodeGroup
+
+2. Once the new node group is created, we wan to deploy any new deployments to this new node group instead of old node group. to do this we need to do "cordon""" the 1st node gorup*****
+kubectl cordon my-node                                                # Mark my-node as unschedulable
+kubectl drain my-node                                                 # Drain my-node in preparation for maintenance
+kubectl uncordon my-node                                              # Mark my-node as schedulable
+
+3. Let's deploy the new deployment in the cluster, so the new deployment doesnot happen in those 2 old nodes****
+
+4. Let's Drain nodes of old nodegroup
+
+
+[root@ip-172-31-42-218 kubernetes-updating-nodegroup]# eksctl create nodegroup --cluster=eksdemo1 \
+> --region=us-east-2 \
+> --name=eksdemo-newnodeGroup \
+> --node-type=t2.medium \
+> --nodes=2 \
+> --nodes-min=2 \
+> --nodes-max=4 \
+> --node-volume-size=10 \
+> --ssh-access \
+> --ssh-public-key=rosh_key \
+> --managed \
+> --asg-access \
+> --external-dns-access \
+> --full-ecr-access \
+> --appmesh-access \
+> --alb-ingress-access
+
+
+[root@ip-172-31-42-218 ~]# eksctl get nodegroup --cluster=eksdemo1 --region=us-east-2
+CLUSTER         NODEGROUP               STATUS  CREATED                 MIN SIZE        MAX SIZE        DESIRED CAPACITY INSTANCE TYPE    IMAGE ID        ASG NAME
+eksdemo1        eksdemo-newnodeGroup    ACTIVE  2021-07-07T13:16:14Z    2               4               2                t2.medium        AL2_x86_64      eks-22bd408e-4cf7-da1b-2ca9-86fa71264d41
+eksdemo1        eksdemo-ng-public       ACTIVE  2021-07-07T12:00:33Z    2               4               2                t2.medium        AL2_x86_64      eks-febd406b-a68e-262b-5a03-72aa51f46633
+
+-------------------------
+
+This is previously available nodes of 1st nodegroup. Need to "Cordon" nodes of Old nodegroup, so that new deployment will not be happen on Old nodegroup
+
+[root@ip-172-31-42-218 kubernetes-updating-nodegroup]# kubectl get nodes
+NAME                                           STATUS   ROLES    AGE   VERSION
+ip-192-168-5-163.us-east-2.compute.internal    Ready    <none>   68m   v1.19.6-eks-49a6c0
+ip-192-168-59-227.us-east-2.compute.internal   Ready    <none>   69m   v1.19.6-eks-49a6c0
+
+kubectl cordon ip-192-168-5-163.us-east-2.compute.internal
+kubectl cordon ip-192-168-59-227.us-east-2.compute.internal
+
+[root@ip-172-31-42-218 ~]# kubectl cordon ip-192-168-5-163.us-east-2.compute.internal
+node/ip-192-168-5-163.us-east-2.compute.internal cordoned
+[root@ip-172-31-42-218 ~]# kubectl cordon ip-192-168-59-227.us-east-2.compute.internal
+node/ip-192-168-59-227.us-east-2.compute.internal cordoned
+[root@ip-172-31-42-218 ~]# kubectl get nodes
+NAME                                           STATUS                     ROLES    AGE   VERSION
+ip-192-168-11-187.us-east-2.compute.internal   Ready                      <none>   13m   v1.19.6-eks-49a6c0
+ip-192-168-5-163.us-east-2.compute.internal    Ready,SchedulingDisabled   <none>   89m   v1.19.6-eks-49a6c0
+ip-192-168-54-84.us-east-2.compute.internal    Ready                      <none>   14m   v1.19.6-eks-49a6c0
+ip-192-168-59-227.us-east-2.compute.internal   Ready,SchedulingDisabled   <none>   89m   v1.19.6-eks-49a6c0
+
+We can see that our pods are still running in the old node grup only*************
+
+-------------------------
+nodejs-deployment.yml    image: naresh240/nodejs-k8s:v1   --> this is the deployment
+
+[root@ip-172-31-42-218 kubernetes-updating-nodegroup]# kubectl apply -f nodejs-deployment.yml
+deployment.apps/nodejs-deployment created
+
+[root@ip-172-31-42-218 kubernetes-updating-nodegroup]# kubectl get deploy
+NAME                READY   UP-TO-DATE   AVAILABLE   AGE
+nginx-deployment    3/3     3            3           31m
+nodejs-deployment   2/2     2            2           32s
+
+[root@ip-172-31-42-218 ~]# kubectl get pods -o wide
+NAME                                READY   STATUS    RESTARTS   AGE   IP               NODE                                           NOMINATED NODE   READINESS GATES
+nginx-deployment-66b6c48dd5-cwjnj   1/1     Running   0          31m   192.168.16.106   ip-192-168-5-163.us-east-2.compute.internal    <none>           <none>
+nginx-deployment-66b6c48dd5-fvccl   1/1     Running   0          31m   192.168.22.219   ip-192-168-5-163.us-east-2.compute.internal    <none>           <none>
+nginx-deployment-66b6c48dd5-vqwzm   1/1     Running   0          31m   192.168.56.237   ip-192-168-59-227.us-east-2.compute.internal   <none>           <none>
+nodejs-deployment-d5999db48-kbrgd   1/1     Running   0          57s   192.168.36.60    ip-192-168-54-84.us-east-2.compute.internal    <none>           <none>
+nodejs-deployment-d5999db48-t8tb7   1/1     Running   0          57s   192.168.6.100    ip-192-168-11-187.us-east-2.compute.internal   <none>           <none>
+
+We can see the last 2 pods which got created in the 2nd nodegroup nodes******* and pods of previous deployment is still running with 1st nodegroup***
+
+-----------------------------------
+
+Draining nodes of old nodegroup--
+============
+
+. Need to drain the older nodegroup. 
+
+[root@ip-172-31-42-218 ~]# kubectl drain ip-192-168-5-163.us-east-2.compute.internal --ignore-daemonsets
+[root@ip-172-31-42-218 ~]# kubectl drain ip-192-168-59-227.us-east-2.compute.internal --ignore-daemonsets --delete-local-data
+
+pod/coredns-56b458df85-qvj8t evicted
+pod/coredns-56b458df85-txtzj evicted
+
+
+Now, if we check all the pods are deployed in the 2nd nodegroup nodes---
+
+[root@ip-172-31-42-218 ~]# kubectl get pods -o wide
+NAME                                READY   STATUS    RESTARTS   AGE     IP              NODE                                           NOMINATED NODE   READINESS GATES
+nginx-deployment-66b6c48dd5-7hnn5   1/1     Running   0          3m11s   192.168.35.93   ip-192-168-54-84.us-east-2.compute.internal    <none>           <none>
+nginx-deployment-66b6c48dd5-gnc2g   1/1     Running   0          81s     192.168.55.39   ip-192-168-54-84.us-east-2.compute.internal    <none>           <none>
+nginx-deployment-66b6c48dd5-qxss7   1/1     Running   0          3m11s   192.168.0.88    ip-192-168-11-187.us-east-2.compute.internal   <none>           <none>
+nodejs-deployment-d5999db48-kbrgd   1/1     Running   0          3h50m   192.168.36.60   ip-192-168-54-84.us-east-2.compute.internal    <none>           <none>
+nodejs-deployment-d5999db48-t8tb7   1/1     Running   0          3h50m   192.168.6.100   ip-192-168-11-187.us-east-2.compute.internal   <none>           <none>
+
+----------------------------------------------------------------
+
+To make the node available again for serving the pods ---
+
+[root@ip-172-31-42-218 ~]# kubectl uncordon ip-192-168-59-227.us-east-2.compute.internal
+node/ip-192-168-59-227.us-east-2.compute.internal uncordoned
+
+[root@ip-172-31-42-218 ~]# kubectl get nodes
+NAME                                           STATUS                     ROLES    AGE     VERSION
+ip-192-168-11-187.us-east-2.compute.internal   Ready                      <none>   4h12m   v1.19.6-eks-49a6c0
+ip-192-168-5-163.us-east-2.compute.internal    Ready,SchedulingDisabled   <none>   5h28m   v1.19.6-eks-49a6c0
+ip-192-168-54-84.us-east-2.compute.internal    Ready                      <none>   4h13m   v1.19.6-eks-49a6c0
+ip-192-168-59-227.us-east-2.compute.internal   Ready                      <none>   5h29m   v1.19.6-eks-49a6c0
+
+---------------------------------------------------------------
+
+Deleting the NodeGroup--
+
+[root@ip-172-31-42-218 ~]# eksctl delete nodegroup --cluster=eksdemo1 --region=us-east-2 --name=eksdemo-ng-public
+
+[root@ip-172-31-42-218 ~]# eksctl get nodegroup --cluster=eksdemo1 --region=us-east-2
+CLUSTER         NODEGROUP               STATUS          CREATED                 MIN SIZE        MAX SIZE        DESIRED CAPACITY    INSTANCE TYPE   IMAGE ID        ASG NAME
+eksdemo1        eksdemo-newnodeGroup    ACTIVE          2021-07-07T13:16:14Z    2               4               2  t2.medium        AL2_x86_64      eks-22bd408e-4cf7-da1b-2ca9-86fa71264d41
+eksdemo1        eksdemo-ng-public       DELETING        2021-07-07T12:00:33Z    2               4               2  t2.medium        AL2_x86_64      eks-febd406b-a68e-262b-5a03-72aa51f46633
+
+[root@ip-172-31-42-218 ~]# kubectl get nodes
+NAME                                           STATUS   ROLES    AGE     VERSION
+ip-192-168-11-187.us-east-2.compute.internal   Ready    <none>   4h17m   v1.19.6-eks-49a6c0
+ip-192-168-54-84.us-east-2.compute.internal    Ready    <none>   4h18m   v1.19.6-eks-49a6c0
 
