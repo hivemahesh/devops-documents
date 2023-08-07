@@ -1,0 +1,420 @@
+EKS Backup and Restore Velero::
+##################################
+
+Step1: install jq 
+
+[root@ip-172-31-11-47 ~]# yum install jq -y
+
+Step2: Provide AWS_REGION
+
+[root@ip-172-31-11-47 ~]# export AWS_REGION=ap-south-1
+[root@ip-172-31-11-47 ~]# echo $AWS_REGION
+ap-south-1
+
+[root@ip-172-31-11-47 ~]# sudo ./aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli --update
+Found same AWS CLI version: /usr/local/aws-cli/v2/2.13.3. Skipping install.
+
+[root@ip-172-31-11-47 ~]# export PATH=$PATH:/usr/local/bin/
+
+
+Step3: Create an S3 bucket to backup cluster
+
+export VELERO_BUCKET=$(aws s3api create-bucket \
+--bucket eksworkshop-backup-$(date +%s)-$RANDOM \
+--region $AWS_REGION \
+--create-bucket-configuration LocationConstraint=$AWS_REGION \
+--| jq -r '.Location' \
+--| cut -d'/' -f3 \
+--| cut -d'.' -f1)
+
+[root@ip-172-31-11-47 ~]# export VELERO_BUCKET=$(aws s3api create-bucket \
+--bucket eksworkshop-backup-$(date +%s)-$RANDOM \
+--region $AWS_REGION \
+--create-bucket-configuration LocationConstraint=$AWS_REGION \
+--| jq -r '.Location' \
+--| cut -d'/' -f3 \
+--| cut -d'.' -f1)
+
+
+I can see S3 bucket in Amazon site url::
+
+[root@ip-172-31-11-47 ~]# aws s3 ls
+2023-08-07 07:50:22 eksworkshop-backup-1691394619-13507
+
+Now, let’s save the VELERO_BUCKET environment variable into the bash_profile    ++++++++++++++
+
+[root@ip-172-31-11-47 ~]# echo "export VELERO_BUCKET=${VELERO_BUCKET}" | tee -a ~/.bash_profile
+export VELERO_BUCKET=eksworkshop-backup-1691394619-13507
+
+
+Step4.   Create an IAM USER Velero:  +++++
+
+aws iam create-user --user-name velero
+
+[root@ip-172-31-11-47 ~]# aws iam create-user --user-name velero
+{
+    "User": {
+        "Path": "/",
+        "UserName": "velero",
+        "UserId": "AIDAX7DI7XHJMFODBQ6SD",
+        "Arn": "arn:aws:iam::547828513234:user/velero",
+        "CreateDate": "2023-08-07T07:54:06+00:00"
+    }
+}
+
+Step5. Attach policies to give velero the necessary permissions:   ++++++++
+
+
+[root@ip-172-31-11-47 ~]# cat velero-policy.json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "ec2:DescribeVolumes",
+                "ec2:DescribeSnapshots",
+                "ec2:CreateTags",
+                "ec2:CreateVolume",
+                "ec2:CreateSnapshot",
+                "ec2:DeleteSnapshot"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "s3:GetObject",
+                "s3:DeleteObject",
+                "s3:PutObject",
+                "s3:AbortMultipartUpload",
+                "s3:ListMultipartUploadParts"
+            ],
+            "Resource": [
+                "arn:aws:s3:::eksworkshop-backup-1691394619-13507/*"
+            ]
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "s3:ListBucket"
+            ],
+            "Resource": [
+                "arn:aws:s3:::eksworkshop-backup-1691394619-13507"
+            ]
+        }
+    ]
+}
+
+Attach policy to velero IAM User:   +++++++++++++++++++++++++++++++
+
+ aws iam put-user-policy \
+--user-name velero \
+--policy-name velero \
+--policy-document file://velero-policy.json
+
+[root@ip-172-31-11-47 ~]#  aws iam put-user-policy \
+--user-name velero \
+--policy-name velero \
+--policy-document file://velero-policy.json
+
+
+
+Step7. Create an access key for the user
+
+[root@ip-172-31-11-47 ~]# aws iam create-access-key --user-name velero > velero-access-key.json    ++++++++++++++++++++++
+
+[root@ip-172-31-11-47 ~]# cat velero-access-key.json
+{
+    "AccessKey": {
+        "UserName": "velero",
+        "AccessKeyId": "AKIAX7DI7XHJM24XKC5Q",
+        "Status": "Active",
+        "SecretAccessKey": "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",
+        "CreateDate": "2023-08-07T08:02:36+00:00"
+    }
+}
+
+
+Step8. Now, let’s set the VELERO_ACCESS_KEY_ID and VELERO_SECRET_ACCESS_KEY environment variables and save them to bash_profile
+
+export VELERO_ACCESS_KEY_ID=$(cat velero-access-key.json | jq -r '.AccessKey.AccessKeyId')
+export VELERO_SECRET_ACCESS_KEY=$(cat velero-access-key.json | jq -r '.AccessKey.SecretAccessKey')
+echo "export VELERO_ACCESS_KEY_ID=${VELERO_ACCESS_KEY_ID}" | tee -a ~/.bash_profile
+echo "export VELERO_SECRET_ACCESS_KEY=${VELERO_SECRET_ACCESS_KEY}" | tee -a ~/.bash_profile
+
+[root@ip-172-31-11-47 ~]# export VELERO_ACCESS_KEY_ID=$(cat velero-access-key.json | jq -r '.AccessKey.AccessKeyId')
+[root@ip-172-31-11-47 ~]#  export VELERO_SECRET_ACCESS_KEY=$(cat velero-access-key.json | jq -r '.AccessKey.SecretAccessKey')
+[root@ip-172-31-11-47 ~]# echo "export VELERO_ACCESS_KEY_ID=${VELERO_ACCESS_KEY_ID}" | tee -a ~/.bash_profile
+export VELERO_ACCESS_KEY_ID=AKIAX7DI7XHJM24XKC5Q
+[root@ip-172-31-11-47 ~]# echo "export VELERO_SECRET_ACCESS_KEY=${VELERO_SECRET_ACCESS_KEY}" | tee -a ~/.bash_profile
+export VELERO_SECRET_ACCESS_KEY=Pg8Pxr90CXwL25/aj/m0dzEjxifYHVKkxumtZabe
+
+
+Step9. Create a credentials file (velero-credentials) specfic to velero user in your local directory (~/environment). We will need this file when we install velero on EKS
+
+cat > velero-credentials <<EOF
+[default]
+aws_access_key_id=$VELERO_ACCESS_KEY_ID
+aws_secret_access_key=$VELERO_SECRET_ACCESS_KEY
+EOF
+
+[root@ip-172-31-11-47 ~]# cat > velero-credentials <<EOF
+[default]
+aws_access_key_id=$VELERO_ACCESS_KEY_ID
+aws_secret_access_key=$VELERO_SECRET_ACCESS_KEY
+EOF
+
+
+Step10. INSTALL VELERO
+
+[root@ip-172-31-11-47 ~]# wget https://github.com/vmware-tanzu/velero/releases/download/v1.11.1/velero-v1.11.1-linux-amd64.tar.gz
+
+[root@ip-172-31-11-47 ~]# tar -xvf velero-v1.11.1-linux-amd64.tar.gz
+
+[root@ip-172-31-11-47 ~]# mv velero-v1.11.1-linux-amd64/velero /usr/bin
+
+[root@ip-172-31-11-47 ~]# velero version
+Client:
+        Version: v1.11.1
+
+Step11. Install Velero on EKS
+
+velero install \
+--provider aws \
+--plugins velero/velero-plugin-for-aws:v1.6.0 \
+--bucket $VELERO_BUCKET \
+--backup-location-config region=$AWS_REGION \
+--snapshot-location-config region=$AWS_REGION \
+--secret-file ./velero-credentials
+
+
+[root@ip-172-31-11-47 ~]# velero install --provider aws --plugins velero/velero-plugin-for-aws:v1.6.0 --bucket $VELERO_BUCKET --backup-location-config region=$AWS_REGION --snapshot-location-config region=$AWS_REGION --secret-file ./velero-credentials
+
+VolumeSnapshotLocation/default: created
+Deployment/velero: attempting to create resource
+Deployment/velero: attempting to create resource client
+Deployment/velero: created
+Velero is installed! ⛵ Use 'kubectl logs deployment/velero -n velero' to view the status.
+
+
+
+[root@ip-172-31-11-47 ~]# kubectl get all -n velero
+NAME                          READY   STATUS    RESTARTS   AGE
+pod/velero-7f7d4d8f94-fxkn8   1/1     Running   0          76s
+
+NAME                     READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/velero   1/1     1            1           76s
+
+NAME                                DESIRED   CURRENT   READY   AGE
+replicaset.apps/velero-7f7d4d8f94   1         1         1       76s
+
+
+
+Step13. Deploy Nodejs Application in nodejsdeploy namespace
+
+[root@ip-172-31-11-47 ~]# vi namespace.yml
+[root@ip-172-31-11-47 ~]# cat namespace.yml
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nodejsdeploy
+
+
+[root@ip-172-31-11-47 ~]# cat deployment.yml
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nodejs-deployment
+  namespace: nodejsdeploy
+  labels:
+    app: nodejs
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25%
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: nodejs
+  template:
+    metadata:
+      labels:
+        app: nodejs
+    spec:
+      containers:
+      - name: nodejs-deployment
+        image: naresh240/springboothello:v9
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+		
+[root@ip-172-31-11-47 ~]# vi service.yml
+[root@ip-172-31-11-47 ~]# cat service.yml
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nodejs-service
+  namespace: nodejsdeploy1
+spec:
+  type: LoadBalancer
+  selector:
+    app: nodejs
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+
+[root@ip-172-31-11-47 ~]# kubectl apply -f namespace.yml
+namespace/nodejsdeploy created
+[root@ip-172-31-11-47 ~]# kubectl apply -f deployment.yml
+deployment.apps/nodejs-deployment created
+[root@ip-172-31-11-47 ~]# kubectl apply -f service.yml
+service/nodejs-service created
+
+[root@ip-172-31-11-47 ~]# kubectl get all -n nodejsdeploy
+NAME                                     READY   STATUS    RESTARTS      AGE
+pod/nodejs-deployment-7d4f8d448d-6w5l4   1/1     Running   2 (16s ago)   28s
+pod/nodejs-deployment-7d4f8d448d-zhktw   1/1     Running   2 (15s ago)   28s
+
+NAME                     TYPE           CLUSTER-IP      EXTERNAL-IP                                                                PORT(S)          AGE
+service/nodejs-service   LoadBalancer   10.100.75.254   ab3db584c6b25417585e407aeb9343bb-1256760337.ap-south-1.elb.amazonaws.com   8080:32760/TCP   12s
+
+NAME                                READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/nodejs-deployment   2/2     2            2           28s
+
+NAME                                           DESIRED   CURRENT   READY   AGE
+replicaset.apps/nodejs-deployment-7d4f8d448d   2         2         2       28s
+
+
+--------------------------------------
+
+Step14. BACKUP AND RESTORE
+
+Let’s backup the "nodejsdeploy" namespace using velero
+
+[root@ip-172-31-11-47 ~]# velero backup create my-backup --include-namespaces nodejsdeploy1
+Backup request "my-backup" submitted successfully.
+Run `velero backup describe my-backup` or `velero backup logs my-backup` for more details.
+
+
+Check the status of backup --->  *********************************************************************************
+
+[root@ip-172-31-11-47 ~]# velero backup get
+NAME        STATUS      ERRORS   WARNINGS   CREATED                         EXPIRES   STORAGE LOCATION   SELECTOR
+my-backup   Completed   0        0          2023-08-07 09:09:19 +0000 UTC   29d       default            <none>
+[root@ip-172-31-11-47 ~]# velero backup describe my-backup
+Name:         my-backup
+Namespace:    velero
+Labels:       velero.io/storage-location=default
+Annotations:  velero.io/source-cluster-k8s-gitversion=v1.25.12-eks-2d98532
+              velero.io/source-cluster-k8s-major-version=1
+              velero.io/source-cluster-k8s-minor-version=25+
+
+Phase:  Completed
+
+
+Namespaces:
+  Included:  nodejsdeploy1
+  Excluded:  <none>
+
+Resources:
+  Included:        *
+  Excluded:        <none>
+  Cluster-scoped:  auto
+
+Label selector:  <none>
+
+Storage Location:  default
+
+Velero-Native Snapshot PVs:  auto
+
+TTL:  720h0m0s
+
+CSISnapshotTimeout:    10m0s
+ItemOperationTimeout:  1h0m0s
+
+Hooks:  <none>
+
+Backup Format Version:  1.1.0
+
+Started:    2023-08-07 09:09:19 +0000 UTC
+Completed:  2023-08-07 09:09:21 +0000 UTC
+
+Expiration:  2023-09-06 09:09:19 +0000 UTC
+
+Total items to be backed up:  25
+Items backed up:              25
+
+Velero-Native Snapshots: <none included>
+
+*********************************************************************************
+NOW LET'S DESTRY EVRYTHING FROM THE NAMESPACE***   Let’s delete the "nodejsdeploy1" namespace to simulate a disaster
+
+[root@ip-172-31-11-47 ~]# velero backup get
+NAME        STATUS      ERRORS   WARNINGS   CREATED                         EXPIRES   STORAGE LOCATION   SELECTOR
+my-backup   Completed   0        0          2023-08-07 09:09:19 +0000 UTC   29d       default            <none>
+
+
+
+[root@ip-172-31-11-47 ~]# kubectl delete namespace nodejsdeploy1
+namespace "nodejsdeploy1" deleted
+
+Check Deployment and service is deleted or not  --->
+
+[root@ip-172-31-11-47 ~]# kubectl get all -n nodejsdeploy1
+No resources found in nodejsdeploy1 namespace.
+
+
+Restore nodejsdeploy namespace				+++++++++++++++++++++
+
+[root@ip-172-31-11-47 ~]# velero backup get
+NAME        STATUS      ERRORS   WARNINGS   CREATED                         EXPIRES   STORAGE LOCATION   SELECTOR
+my-backup   Completed   0        0          2023-08-07 09:09:19 +0000 UTC   29d       default            <none>
+
+
+Available Commands:
+  create      Create a backup
+  delete      Delete backups
+  describe    Describe backups
+  download    Download a backup
+  get         Get backups
+  logs        Get backup logs
+
+
+[root@ip-172-31-11-47 ~]# velero restore create --from-backup my-backup
+Restore request "my-backup-20230807091242" submitted successfully.
+Run `velero restore describe my-backup-20230807091242` or `velero restore logs my-backup-20230807091242` for more details.
+You can check the restore status using the command below:	  
+
+[root@ip-172-31-11-47 ~]#  velero restore get
+NAME                       BACKUP      STATUS      STARTED                         COMPLETED                       ERRORS   WARNINGS   CREATED                         SELECTOR
+my-backup-20230807091242   my-backup   Completed   2023-08-07 09:12:43 +0000 UTC   2023-08-07 09:12:44 +0000 UTC   0        1          2023-08-07 09:12:43 +0000 UTC   <none>
+
+
+Verify if deployments, replicasets, services and pods are restored:
+
+[root@ip-172-31-11-47 ~]# kubectl get all -n nodejsdeploy1
+NAME                                     READY   STATUS    RESTARTS   AGE
+pod/nodejs-deployment-785dcf55b9-5bz5k   1/1     Running   0          44s
+pod/nodejs-deployment-785dcf55b9-zfm8h   1/1     Running   0          44s
+
+NAME                     TYPE           CLUSTER-IP      EXTERNAL-IP                                                                PORT(S)          AGE
+service/nodejs-service   LoadBalancer   10.100.183.41   ac5b47257acec411fb60ab06d8fe0663-1443357959.ap-south-1.elb.amazonaws.com   8080:30075/TCP   44s
+
+NAME                                READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/nodejs-deployment   2/2     2            2           44s
+
+NAME                                           DESIRED   CURRENT   READY   AGE
+replicaset.apps/nodejs-deployment-785dcf55b9   2         2         2       44s
+
+
+[root@ip-172-31-11-47 ~]# velero backup delete my-backup			+++++++++++++++++++
+Are you sure you want to continue (Y/N)? Y
+Request to delete backup "my-backup" submitted successfully.
+The backup will be fully deleted after all associated data (disk snapshots, backup files, restores) are removed.
